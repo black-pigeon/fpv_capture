@@ -1,0 +1,40 @@
+# Private FPGA implementation, generated hardware and debug exports.
+/fpga/
+/hardware/
+
+# Private kernel implementations and historical archives containing source.
+/firmware/board/e200/linux/*/
+/firmware/board/e200/patches/autosave/
+
+# Independent upstream checkouts and local build/deployment outputs.
+/firmware/u-boot/
+/firmware/linux/
+/firmware/buildroot/
+/firmware/embeddedsw/
+/firmware/device-tree-xlnx/
+/firmware/build/
+/firmware/.source-stamps/
+/firmware/.fetch.lock
+/build/
+/.vscode/
+.Xil/
+/*.gen/
+/NA/
+__pycache__/
+*.pyc
+
+# Captured signals and local device data.
+/*.packet
+/*.pgm
+/*.bmp
+
+# Internal designs, implementation plans, manifests and lab records.
+/docs/*
+!/docs/public-repository.md
+
+# Verification sources that expose/depend on private implementation.
+/app/tests/test_capture_driver.py
+/app/tests/test_capture_driver_host.c
+/tests/test_fpga_export.py
+/tests/test_e200_ethernet.py
+/tests/check_capture_packets.py

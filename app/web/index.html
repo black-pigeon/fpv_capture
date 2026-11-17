@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>E200 · FPV Scanner</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<body>
+<header><div class="brand"><span class="mark">E</span><div><strong>E200</strong><span class="subbrand">Analog FPV Scanner</span></div></div><div class="connection"><span id="led" class="led"></span><span id="connection">Connecting</span><span class="chip">4 DDC / 1 DMA</span></div></header>
+<div id="simulation" class="simulation" hidden>SIMULATION · Software-generated images. These results do not come from RF hardware.</div>
+<main>
+<aside class="panel controls">
+<div class="eyebrow">SCAN CONFIGURATION</div><h1>Search the band</h1><p class="intro">Four parallel digital receivers search each RF window. Stable video sync triggers grayscale frame capture.</p>
+<form id="scan-form">
+<label for="bands">Frequency ranges <span>MHz</span></label><textarea id="bands" name="bands" rows="4" required spellcheck="false">5650-5950</textarea><p class="hint">One range per line, up to 8. Example: 5650-5950. Use 5800-5800 to stay on one frequency.</p>
+<div class="presets" role="group" aria-label="Scan presets"><button id="preset-fine" class="quiet" type="button">Fine · 2 MHz</button><button id="preset-fast" class="quiet" type="button">Fast · 8 MHz</button></div>
+<div class="fields"><div><label for="step">Search grid <span>MHz</span></label><input id="step" name="step_mhz" type="number" min="0.1" max="10" step="0.1" value="2" required></div><div><label for="gain">RX gain <span>dB</span></label><input id="gain" name="gain_db" type="number" min="0" max="60" step="1" value="20" required></div><div><label for="dwell">Observation <span>ms</span></label><input id="dwell" name="dwell_ms" type="number" min="100" max="1000" step="1" value="150" required></div><div><label for="settle">RF settling <span>ms</span></label><input id="settle" name="settle_ms" type="number" min="0" max="1000" step="1" value="20" required></div></div>
+<p id="grid-note" class="hint">Fine grid: more observation time, smaller carrier offsets.</p>
+<label class="check"><input id="repeat" name="repeat" type="checkbox" checked> Repeat scan and refresh images</label>
+<button class="primary" id="start" type="submit">Start scan <span>→</span></button><button class="secondary" id="stop" type="button" disabled>Stop scan</button>
+</form>
+<div class="control-note"><strong>RF LO + four digital tuners</strong><p>61.44 MSPS input, 15.36 MSPS per DDC. Search centers span up to 40 MHz per LO. The LO stays fixed while digital tuning fills the grid. RF settling applies only when RF settings change.</p><p>A coarse grid is faster but may miss off-center signals. Try a 2 MHz grid and longer observation around a suspected frequency. 40 MHz is a center scheduling limit, not guaranteed detection bandwidth.</p><p>PAL / NTSC is confirmed using FPGA video sync and a validated DMA frame. 70–6000 MHz is the software tuning range; usable frequencies depend on the E200 RF front end and antenna.</p></div>
+</aside>
+<section class="workspace">
+<div class="workspace-heading"><div><div class="eyebrow">LIVE OBSERVATION</div><h2>Detection &amp; images</h2></div><span id="phase" class="status-tag">Ready</span></div>
+<div class="metrics"><div><span>Scan progress</span><strong id="progress-label">0 / 0 <small>points</small></strong></div><div><span>Current RF LO</span><strong id="lo">— <small>MHz</small></strong></div><div><span>Completed passes</span><strong id="rounds">0</strong></div><div><span>Confirmed records</span><strong id="track-count">0</strong></div></div><progress id="progress" max="1" value="0" aria-label="Current scan progress"></progress>
+<div class="tuning-info panel"><div><strong>Hybrid tuning</strong><span id="tune-counts">0 RF changes · 0 DDC settings</span><span id="window-phase">Digital phase 0 / 0</span></div><div id="channel-centers" class="channel-centers"><span>Channel centers will appear when scanning starts.</span></div></div>
+<p id="message" role="status" class="message" hidden></p>
+<div class="viewer panel"><div class="viewer-top"><span class="live-label"><span class="tiny-square"></span> GRAYSCALE FRAME</span><span id="frame-size">720 × 576 / 480</span></div><div class="image-area"><div id="empty"><div class="viewfinder">＋</div><strong>Waiting for analog video</strong><p>Images appear after video sync and DMA frame validation.</p></div><img id="frame" alt="Grayscale frame from the selected observation" hidden></div><div class="viewer-bottom"><div><strong id="selected-frequency">No image yet</strong><span id="selected-detail">Select a record below to view its image</span></div><a id="download" hidden download="fpv-frame.bmp">Save BMP ↓</a></div></div>
+<div class="results-heading"><div><h3>Confirmed records <span id="result-count">00</span></h3><p>Frequencies are quantized DDC centers, not exact carrier estimates. Adjacent records may be the same transmitter. Up to 16 records.</p></div><button id="clear" class="quiet" type="button">Clear records</button></div>
+<div class="table-wrap panel"><table><thead><tr><th>Center / MHz</th><th>Standard</th><th>Channel</th><th>Regular lines</th><th>Frame age</th><th></th></tr></thead><tbody id="results"><tr><td colspan="6" class="empty-row">No confirmed records yet</td></tr></tbody></table></div>
+<div class="footnote"><span>PS GEM0 / EMIO · Local offline control</span><span id="capture-errors">Incomplete / rejected DMA frames: 0</span></div>
+</section>
+</main>
+</body></html>

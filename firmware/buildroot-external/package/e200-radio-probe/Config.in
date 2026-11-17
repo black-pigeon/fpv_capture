@@ -1,0 +1,5 @@
+config BR2_PACKAGE_E200_RADIO_PROBE
+	bool "E200 no-OS radio and FPV capture diagnostics"
+	help
+	  Build fpv-radio-probe and fpv-capture (selected-channel DMA to PGM).
+	  No init script is installed; radio access is manual.

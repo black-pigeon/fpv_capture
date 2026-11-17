@@ -1,0 +1,4 @@
+menu "E200 FPV packages"
+source "$BR2_EXTERNAL_MPSOC_IMAGE_BUILDER_PATH/package/e200-radio-probe/Config.in"
+source "$BR2_EXTERNAL_MPSOC_IMAGE_BUILDER_PATH/package/rootfs-fixups/Config.in"
+endmenu

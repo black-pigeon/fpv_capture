@@ -1,0 +1,35 @@
+{
+  "components": {
+    "buildroot": {
+      "commit": "8e117464920f2aa2ab7bfc288934c6af4e3504bb",
+      "directory": "buildroot",
+      "ref": "2022.02.12",
+      "url": "https://github.com/buildroot/buildroot.git"
+    },
+    "device-tree-xlnx": {
+      "commit": "24d29888d0048f26e4f3d6e0b7cd655aede94f31",
+      "directory": "device-tree-xlnx",
+      "ref": "xilinx_v2022.2",
+      "url": "https://github.com/Xilinx/device-tree-xlnx.git"
+    },
+    "embeddedsw": {
+      "commit": "5330a64c8efd14f0eef09befdbb8d3d738c33ec2",
+      "directory": "embeddedsw",
+      "ref": "xilinx_v2022.2",
+      "url": "https://github.com/Xilinx/embeddedsw.git"
+    },
+    "linux": {
+      "commit": "e26621179c3b1834a1bb17e9a38e47238ac63bf5",
+      "directory": "linux",
+      "ref": "xilinx-v2022.2",
+      "url": "https://github.com/Xilinx/linux-xlnx.git"
+    },
+    "u-boot": {
+      "commit": "b81542a91fb0012afea6dcfde9af25079df26865",
+      "directory": "u-boot",
+      "ref": "xilinx-v2022.2",
+      "url": "https://github.com/Xilinx/u-boot-xlnx.git"
+    }
+  },
+  "schema": 1
+}

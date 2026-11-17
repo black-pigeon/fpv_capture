@@ -1,0 +1,15 @@
+From: E200 FPV Builder <builder@example.invalid>
+Subject: [PATCH] Enable E200 Realtek PHY for xilinx-v2022.2
+
+AXI Ethernet and Xilinx DMA are already enabled in this pinned upstream
+configuration. Add only the missing Realtek PHY selection.
+
+---
+--- a/arch/arm/configs/xilinx_zynq_defconfig
++++ b/arch/arm/configs/xilinx_zynq_defconfig
+@@ -109,4 +109,5 @@
+ CONFIG_XILINX_AXI_EMAC=y
+ CONFIG_MARVELL_PHY=y
++CONFIG_REALTEK_PHY=y
+ CONFIG_VITESSE_PHY=y
+ CONFIG_MDIO_BITBANG=y

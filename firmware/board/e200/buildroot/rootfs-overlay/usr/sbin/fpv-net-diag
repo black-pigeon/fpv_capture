@@ -1,0 +1,24 @@
+#!/bin/sh
+# Read-only report for board Ethernet bring-up; does not reset or retune hardware.
+printf '%s\n' '=== Kernel ==='
+uname -a
+printf '\n%s\n' '=== Ethernet addresses and link ==='
+ip address show dev eth0 2>&1
+for attr in operstate carrier speed duplex; do
+    path=/sys/class/net/eth0/$attr
+    [ ! -r "$path" ] || { printf '%s: ' "$attr"; cat "$path" 2>&1; }
+done
+printf '\n%s\n' '=== MDIO devices (PHY ID read from hardware) ==='
+for dev in /sys/bus/mdio_bus/devices/*; do
+    [ -e "$dev" ] || continue
+    printf '%s\n' "${dev##*/}"
+    for attr in phy_id phy_interface modalias; do
+        [ ! -r "$dev/$attr" ] || { printf '  %s: ' "$attr"; cat "$dev/$attr"; }
+    done
+    [ ! -L "$dev/driver" ] || { printf '  driver: '; readlink "$dev/driver"; }
+done
+printf '\n%s\n' '=== Ethernet kernel messages ==='
+dmesg | grep -i -E 'macb|mdio|rgmii|rtl8211|phy.*(failed|timeout)|eth0|link is'
+printf '\n%s\n' '=== FPV web service ==='
+[ ! -r /var/run/fpv-webd.pid ] || cat /var/run/fpv-webd.pid
+[ ! -r /var/log/fpv-webd.log ] || tail -n 20 /var/log/fpv-webd.log
