@@ -15,8 +15,8 @@ class FirmwareConfigurationTest(unittest.TestCase):
                       if '=' in line)
         self.assertEqual(values['BOARD'], 'e200')
         self.assertEqual(values['SOC_FAMILY'], 'zynq')
-        self.assertEqual(Path(values['HW_FILE']), ROOT / 'hardware/e200_fpv/e200_fpv.xsa')
-        self.assertEqual(Path(values['HW_BIT']), ROOT / 'hardware/e200_fpv/e200_fpv.bit')
+        self.assertEqual(Path(values['HW_FILE']), ROOT / 'firmware/board/e200/hardware/e200_fpv.xsa')
+        self.assertEqual(Path(values['HW_BIT']), Path(values['BUILD_DIR']) / 'e200_fpv.bit')
         self.assertTrue(Path(values['BUILD_DIR']).is_relative_to(ROOT / 'firmware'))
 
     def test_help_is_available_without_fetching(self):

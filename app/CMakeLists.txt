@@ -57,13 +57,8 @@ if(NOT CMAKE_CROSSCOMPILING)
     target_compile_options(test-capture-cli PRIVATE -Wall -Wextra -Werror -UNDEBUG)
     add_test(NAME capture-cli-auto COMMAND test-capture-cli)
     find_package(Python3 COMPONENTS Interpreter REQUIRED)
-    # Driver implementation and its verification harness are private inputs.
-    # Public-only source exports must still build and run application tests.
-    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_driver.py" AND
-       EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../firmware/board/e200/linux/fpv_capture/fpv_capture.c")
-        add_test(NAME capture-driver-auto COMMAND ${Python3_EXECUTABLE}
-            ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_driver.py)
-    endif()
+    add_test(NAME capture-driver-auto COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_driver.py)
 endif()
 
 find_package(Threads REQUIRED)

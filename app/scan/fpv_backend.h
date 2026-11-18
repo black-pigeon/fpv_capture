@@ -10,7 +10,7 @@ struct fpv_backend {
     uint32_t epoch;
     uint64_t radio_lo_hz;
     unsigned radio_gain;
-    int radio_valid, rf_pending, rf_changed;
+    int radio_valid, rf_pending, rf_changed, frame_config_valid;
 };
 void fpv_backend_init(struct fpv_backend *b, int simulate);
 int fpv_backend_open(struct fpv_backend *b,const struct fpv_scan_config *cfg,uint64_t initial_lo);

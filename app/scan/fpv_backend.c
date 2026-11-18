@@ -14,7 +14,7 @@ void fpv_backend_close(struct fpv_backend *b)
 {
     if(b->fd>=0)close(b->fd);
     if(b->phy)ad9361_remove(b->phy);
-    b->fd=-1;b->phy=NULL;b->radio_valid=0;b->rf_pending=0;
+    b->fd=-1;b->phy=NULL;b->radio_valid=0;b->rf_pending=0;b->frame_config_valid=0;
 }
 int fpv_backend_open(struct fpv_backend *b,const struct fpv_scan_config *cfg,uint64_t lo)
 {
@@ -39,7 +39,7 @@ int fpv_backend_open(struct fpv_backend *b,const struct fpv_scan_config *cfg,uin
 }
 int fpv_backend_tune(struct fpv_backend *b,const struct fpv_scan_hop *h,unsigned gain)
 {
-    b->hop=*h;
+    b->hop=*h;b->frame_config_valid=0;
     int lo_changed=!b->radio_valid||b->radio_lo_hz!=h->lo_hz;
     int gain_changed=!b->radio_valid||b->radio_gain!=gain;
     b->rf_changed=b->rf_pending||lo_changed||gain_changed;
@@ -58,7 +58,8 @@ int fpv_backend_tune(struct fpv_backend *b,const struct fpv_scan_hop *h,unsigned
     b->radio_lo_hz=h->lo_hz;b->radio_gain=gain;b->radio_valid=1;b->rf_pending=0;
     b->config=(struct fpv_capture_config_v2){.config={.channel=0,.enable_mask=h->enable_mask,.timeout_ms=350},.auto_mask=h->enable_mask};
     for(unsigned i=0;i<4;i++)b->config.config.cfo[i]=h->cfo[i];
-    return ioctl(b->fd,FPV_CAPTURE_CONFIG_V2,&b->config);
+    int ret=ioctl(b->fd,FPV_CAPTURE_CONFIG_V2,&b->config);
+    b->frame_config_valid=ret==0;return ret;
 }
 int fpv_backend_commit(struct fpv_backend *b)
 {
@@ -90,8 +91,13 @@ int fpv_backend_frame(struct fpv_backend *b,unsigned ch,unsigned *std,unsigned c
         for(unsigned y=0;y<576;y++)for(unsigned x=0;x<720;x++)(*gray)[y*720+x]=(unsigned char)((x/90)*32+(y/72+b->epoch)%16);
         return 0;
     }
-    b->config.config.channel=ch;
-    if(ioctl(b->fd,FPV_CAPTURE_CONFIG_V2,&b->config)<0)goto fail;
+    /* CONFIG applies FPGA settings. Reuse it while staying on the same
+     * channel, and re-apply only after a selection change or failed capture. */
+    if(!b->frame_config_valid || b->config.config.channel!=ch) {
+        b->config.config.channel=ch;
+        if(ioctl(b->fd,FPV_CAPTURE_CONFIG_V2,&b->config)<0)goto fail;
+        b->frame_config_valid=1;
+    }
     unsigned char *packet=malloc(FPV_CAPTURE_MAX_BYTES);if(!packet)goto fail;
     ssize_t n=read(b->fd,packet,FPV_CAPTURE_MAX_BYTES);
     struct fpv_frame_info info;
@@ -101,5 +107,6 @@ int fpv_backend_frame(struct fpv_backend *b,unsigned ch,unsigned *std,unsigned c
     if(info.channel!=ch){errno=EBADMSG;goto fail;}
     *height=info.height;*std=info.standard;return 0;
 fail:
+    b->frame_config_valid=0;
     free(*gray);*gray=NULL;return -1;
 }

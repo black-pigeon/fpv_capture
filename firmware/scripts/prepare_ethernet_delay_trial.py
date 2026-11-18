@@ -28,7 +28,7 @@ def main():
     if out.exists():
         parser.error('output already exists; choose a new directory')
     source = baseline / 'devicetree.dtb'
-    info = verify_ethernet_dtb(source)
+    info = verify_ethernet_dtb(source, expected_mode='rgmii-rxid')
     before = dump(source)
     original = 'phy-mode = "rgmii-rxid";'
     if before.count(original) != 1:

@@ -17,6 +17,18 @@
 		i2c0 = &i2c0;
 	};
 
+	// E200 green status LED: PS MIO0, active high, as in the Pluto/iqtaxi BSP.
+	// The kernel heartbeat trigger runs independently of RF initialization.
+	leds {
+		compatible = "gpio-leds";
+		led0 {
+			label = "led0:green";
+			gpios = <&gpio0 0 0>;
+			linux,default-trigger = "heartbeat";
+			default-state = "off";
+		};
+	};
+
 	memory@0 {
 		device_type = "memory";
 		reg = <0x0 0x10000000>;
@@ -84,12 +96,12 @@
 };
 
 // PS GEM0 -> EMIO GMII -> PL GMII/RGMII bridge -> RTL8211F.
-// Match the verified antsdr-fw-patch E200 PHY mode and bridge parameters.
+// Use the rgmii-id PHY delay setting verified on the E200 capture firmware.
 // B19 PHY reset stays high in the FPGA shell. Read the PHY ID over MDIO:
 // forcing a PHY ID creates a device even if the hardware does not respond.
 &gem0 {
     status = "okay";
-    phy-mode = "rgmii-rxid";
+    phy-mode = "rgmii-id";
     phy-handle = <&rtl8211f_phy>;
     local-mac-address = [00 0a 35 00 00 00];
     #address-cells = <1>;

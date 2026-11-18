@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const phases = { idle: 'Ready', starting: 'Starting', initializing: 'Initializing RF', tuning: 'Tuning', observing: 'Observing sync', capturing: 'Validating frame', rf_settle: 'RF settling', ddc_tuning: 'Digital tuning', error: 'Scan error' };
-let selected = null, currentKey = '', firstStatus = true, busy = false, latest = null;
+const phases = { idle: 'Ready', starting: 'Starting', initializing: 'Initializing RF', tuning: 'Tuning', observing: 'Observing sync', capturing: 'Validating frame', rf_settle: 'RF settling', ddc_tuning: 'Digital tuning', waiting_signal: 'Waiting for video sync', error: 'Acquisition error' };
+let selected = null, currentKey = '', firstStatus = true, busy = false, latest = null, frameLoading = false;
 function notice(text) { $('message').textContent = text; $('message').hidden = !text; }
 function frequency(hz) { return (hz / 1e6).toFixed(3); }
 async function command(path, body = '') {
@@ -12,6 +12,10 @@ function selectTrack(id) { selected = id; currentKey = ''; if (latest) renderTra
 function renderTracks(s) {
     const tracks = [...s.tracks].sort((a, b) => a.frequency_hz - b.frequency_hz);
     if (!tracks.some(t => t.id === selected)) selected = tracks.length ? tracks[0].id : null;
+    if (s.mode === 'lock') {
+        const newest = tracks.filter(t => t.target_hz === s.lock_hz).sort((a, b) => a.age_ms - b.age_ms)[0];
+        if (newest) selected = newest.id;
+    }
     const rows = $('results'); rows.replaceChildren();
     if (!tracks.length) {
         const row = rows.insertRow(), td = row.insertCell(); td.colSpan = 6; td.className = 'empty-row'; td.textContent = 'No confirmed records yet';
@@ -28,7 +32,7 @@ function renderTracks(s) {
         row.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectTrack(t.id); } });
         if (t.id === selected) {
             const key = `${t.id}-${t.revision}`, url = `/image/${t.id}.bmp?revision=${t.revision}`;
-            if (key !== currentKey) { $('frame').src = url; currentKey = key; }
+            if (key !== currentKey && !frameLoading) { frameLoading = true; $('frame').src = url; currentKey = key; }
             $('frame').hidden = false; $('empty').hidden = true;
             $('selected-frequency').textContent = `${frequency(t.frequency_hz)} MHz · ${t.standard}`;
             $('selected-detail').textContent = `CH ${t.channel} · Epoch #${t.epoch} · ${t.width} × ${t.height} · ${t.age_ms < 1000 ? 'Updated just now' : `${(t.age_ms / 1000).toFixed(1)} s ago`}`;
@@ -36,18 +40,37 @@ function renderTracks(s) {
             $('download').href = url; $('download').download = `fpv-${frequency(t.frequency_hz)}-${t.standard}.bmp`; $('download').hidden = false;
         }
     }
+    $('lock-selected').disabled = selected === null || busy || s.stopping || s.switching;
     $('result-count').textContent = String(tracks.length).padStart(2, '0'); $('track-count').textContent = tracks.length;
 }
 function render(s) {
     latest = s; $('led').className = 'led online'; $('connection').textContent = 'Connected'; $('simulation').hidden = !s.simulate;
-    $('phase').textContent = s.stopping ? 'Stopping' : s.phase === 'idle' && s.rounds ? 'Scan stopped' : phases[s.phase] || s.phase;
-    $('start').disabled = s.running || busy; $('stop').disabled = !s.running || s.stopping || busy; $('clear').disabled = s.running || busy;
-    for (const el of $('scan-form').elements) if (el.tagName !== 'BUTTON' || el.id.startsWith('preset-')) el.disabled = s.running;
-    $('progress-label').textContent = `${s.completed_points} / ${s.total_points} points`;
+    const locked = s.mode === 'lock', switching = s.switching || s.stopping;
+    $('phase').textContent = s.stopping ? 'Stopping' : s.switching ? 'Switching mode' :
+        s.frequency_locked ? (s.signal_present ? 'Frequency held · video sync' : 'Frequency held · waiting for video') : phases[s.phase] || s.phase;
+    $('start').disabled = (s.running && !locked) || switching || busy;
+    $('start').firstChild.textContent = locked && s.running ? 'Resume scan ' : 'Start scan ';
+    $('stop').disabled = !s.running || switching || busy;
+    $('stop').textContent = locked ? 'Stop capture' : 'Stop scan';
+    $('clear').disabled = s.running || busy;
+    $('lock').disabled = switching || busy;
+    $('unlock').disabled = !locked || !s.running || switching || busy;
+    $('lock-frequency').disabled = switching || busy;
+    for (const el of $('scan-form').elements)
+        if (el.tagName !== 'BUTTON' || el.id.startsWith('preset-')) el.disabled = (s.running && !locked) || switching || busy;
+    $('progress-title').textContent = locked ? 'Fixed frequency' : 'Scan progress';
+    const percent = s.total_points ? Math.floor(100 * s.completed_points / s.total_points) : 0;
+    $('progress-label').textContent = locked ? `${frequency(s.lock_hz)} MHz` : `${percent}%`;
+    $('progress').hidden = locked;
     $('progress').max = s.total_points || 1; $('progress').value = s.completed_points;
-    $('lo').textContent = s.lo_hz ? `${frequency(s.lo_hz)} MHz` : '— MHz'; $('rounds').textContent = s.rounds;
+    $('lo').textContent = s.lo_hz ? `${frequency(s.lo_hz)} MHz` : '— MHz';
+    $('rounds-title').textContent = locked ? 'Captured frames' : 'Completed passes';
+    $('rounds').textContent = locked ? s.captured_frames : s.rounds;
     $('tune-counts').textContent = `${s.rf_tunes} RF changes · ${s.ddc_tunes} DDC settings`;
-    $('window-phase').textContent = `Digital phase ${s.window_phase} / ${s.window_phases}`;
+    $('window-phase').textContent = locked ? 'Fixed CH 0 · automatic PAL / NTSC' : `Digital phase ${s.window_phase} / ${s.window_phases}`;
+    $('lock-status').textContent = locked && s.running ?
+        `${s.frequency_locked ? 'Holding' : 'Acquiring'} ${frequency(s.lock_hz)} MHz · ${s.captured_frames} validated frames. ${s.signal_present ? 'Video sync present.' : 'Waiting for video sync; frequency stays fixed.'} Unlock frequency resumes band search.` :
+        'Lock a frequency manually or use the selected result. Unlock frequency resumes band search.';
     const centers = $('channel-centers'); centers.replaceChildren();
     for (const ch of s.channels) {
         const item = document.createElement('span');
@@ -57,7 +80,7 @@ function render(s) {
     $('capture-errors').textContent = `Incomplete / rejected DMA frames: ${s.capture_errors}`;
     if (firstStatus) {
         const c = s.config; $('bands').value = c.bands.map(b => `${b[0] / 1e6}-${b[1] / 1e6}`).join('\n');
-        $('step').value = c.step_mhz; $('gain').value = c.gain_db; $('dwell').value = c.dwell_ms; $('settle').value = c.settle_ms; $('repeat').checked = !!c.repeat; firstStatus = false; gridNote();
+        $('step').value = c.step_mhz; $('gain').value = c.gain_db; $('dwell').value = c.dwell_ms; $('settle').value = c.settle_ms; $('repeat').checked = !!c.repeat; if (s.mode === 'lock') $('lock-frequency').value = s.lock_hz / 1e6; firstStatus = false; gridNote();
     }
     if (s.error) notice(s.error);
     renderTracks(s);
@@ -66,7 +89,7 @@ async function poll() {
     try {
         const r = await fetch('/api/status', { cache: 'no-store' }); if (!r.ok) throw new Error('Failed to read device status'); render(await r.json());
     } catch (e) { $('led').className = 'led'; $('connection').textContent = 'Disconnected'; notice(`Cannot connect to device: ${e.message}`); }
-    finally { setTimeout(poll, 700); }
+    finally { setTimeout(poll, latest && latest.running && latest.mode === 'lock' ? 200 : 700); }
 }
 function gridNote() {
     $('grid-note').textContent = Number($('step').value) > 2
@@ -74,19 +97,42 @@ function gridNote() {
         : 'Fine grid: more observation time, smaller carrier offsets.';
 }
 function preset(step, dwell) {
-    if (latest && latest.running) return;
+    if (latest && latest.running && latest.mode !== 'lock') return;
     $('step').value = step; $('dwell').value = dwell; gridNote();
 }
 $('preset-fine').addEventListener('click', () => preset(2, 150));
 $('preset-fast').addEventListener('click', () => preset(8, 100));
 $('step').addEventListener('input', gridNote);
-$('scan-form').addEventListener('submit', async e => {
-    e.preventDefault(); if (busy) return; busy = true; $('start').disabled = true; notice('');
-    const params = new URLSearchParams(new FormData($('scan-form'))); params.set('repeat', $('repeat').checked ? '1' : '0');
-    try { await command('/api/start', params.toString()); } catch (err) { notice(err.message); }
-    finally { busy = false; }
+// Read values explicitly: scan controls are disabled during a running scan
+// but their settings must still accompany a transition to fixed capture.
+function scanParams() {
+    return new URLSearchParams({ bands: $('bands').value, step_mhz: $('step').value,
+        gain_db: $('gain').value, dwell_ms: $('dwell').value, settle_ms: $('settle').value,
+        repeat: $('repeat').checked ? '1' : '0' });
+}
+async function startMode(locked) {
+    if (busy) return;
+    busy = true; notice(''); if (latest) render(latest);
+    const params = scanParams(); params.set('mode', locked ? 'lock' : 'scan');
+    if (locked) params.set('frequency_mhz', $('lock-frequency').value);
+    try {
+        await command('/api/start', params.toString());
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        if (response.ok) latest = await response.json();
+    } catch (err) { notice(err.message); }
+    finally { busy = false; if (latest) render(latest); }
+}
+$('scan-form').addEventListener('submit', e => { e.preventDefault(); startMode(false); });
+$('lock-form').addEventListener('submit', e => { e.preventDefault(); startMode(true); });
+$('unlock').addEventListener('click', () => startMode(false));
+$('lock-selected').addEventListener('click', () => {
+    const track = latest && latest.tracks.find(t => t.id === selected);
+    if (!track) return;
+    $('lock-frequency').value = track.target_hz / 1e6;
+    startMode(true);
 });
 $('stop').addEventListener('click', async () => { try { await command('/api/stop'); } catch (e) { notice(e.message); } });
 $('clear').addEventListener('click', async () => { try { await command('/api/clear'); } catch (e) { notice(e.message); } });
-$('frame').addEventListener('error', () => { currentKey = ''; notice('Selected frame has changed or expired. Waiting for refresh.'); });
+$('frame').addEventListener('load', () => { frameLoading = false; });
+$('frame').addEventListener('error', () => { frameLoading = false; currentKey = ''; notice('Selected frame has changed or expired. Waiting for refresh.'); });
 poll();

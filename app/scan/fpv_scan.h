@@ -9,7 +9,10 @@
  * This is a scheduling guard, not a guarantee of FPV acquisition bandwidth. */
 #define FPV_SCAN_CENTER_SPAN_HZ 40000000U
 struct fpv_scan_band { uint64_t start_hz, end_hz; };
+enum fpv_scan_mode { FPV_SCAN_MODE_SCAN, FPV_SCAN_MODE_LOCK };
 struct fpv_scan_config {
+    enum fpv_scan_mode mode;
+    uint64_t lock_hz;
     struct fpv_scan_band bands[FPV_SCAN_BANDS];
     unsigned band_count, step_hz, dwell_ms, settle_ms, gain_db, repeat;
 };

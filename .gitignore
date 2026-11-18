@@ -2,8 +2,14 @@
 /fpga/
 /hardware/
 
-# Private kernel implementations and historical archives containing source.
+# Retain unused legacy drivers locally; publish the active capture driver.
 /firmware/board/e200/linux/*/
+!/firmware/board/e200/linux/fpv_capture/
+/firmware/board/e200/linux/fpv_capture/*
+!/firmware/board/e200/linux/fpv_capture/Kconfig
+!/firmware/board/e200/linux/fpv_capture/Makefile
+!/firmware/board/e200/linux/fpv_capture/fpv_capture.c
+!/firmware/board/e200/linux/fpv_capture/COPYING
 /firmware/board/e200/patches/autosave/
 
 # Independent upstream checkouts and local build/deployment outputs.
@@ -33,8 +39,6 @@ __pycache__/
 !/docs/public-repository.md
 
 # Verification sources that expose/depend on private implementation.
-/app/tests/test_capture_driver.py
-/app/tests/test_capture_driver_host.c
 /tests/test_fpga_export.py
 /tests/test_e200_ethernet.py
 /tests/check_capture_packets.py

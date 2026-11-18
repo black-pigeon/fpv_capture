@@ -133,7 +133,7 @@ ATF_FETCH_STAMP := $(SOURCE_STAMP_DIR)/arm-trusted-firmware-$(ATF_REPO_REF).stam
 EMBEDDEDSW_FETCH_STAMP := $(SOURCE_STAMP_DIR)/embeddedsw-$(EMBEDDEDSW_REPO_REF).stamp
 DEVICE_TREE_FETCH_STAMP := $(SOURCE_STAMP_DIR)/device-tree-xlnx-$(DEVICE_TREE_REPO_REF).stamp
 
-.PHONY: validate-source-lock FORCE all help list-boards show-config check-source-board fetch fetch-locked repos toolchain rootfs rootfs-ext4 ramdisk kernel u-boot fsbl dt imageub bootbin sd clean
+.PHONY: validate-source-lock FORCE all help list-boards show-config hardware check-source-board fetch fetch-locked repos toolchain rootfs rootfs-ext4 ramdisk kernel u-boot fsbl dt imageub bootbin sd clean
 
 FORCE:
 
@@ -148,7 +148,9 @@ help:
 	@echo '  fsbl / dt / bootbin  - build from matching E200 FPV XSA'
 	@echo '  sd                   - assemble SD boot files (default)'
 	@echo '  clean                - remove build output only'
-	@echo 'Hardware input: $(HW_FILE), $(HW_BIT)'
+	@echo '  hardware             - validate XSA and extract its bitstream'
+	@echo 'Hardware input: $(HW_FILE)'
+	@echo 'Hardware manifest: $(HW_MANIFEST)'
 
 list-boards:
 	@printf '%s\n' $(AVAILABLE_BOARDS)
@@ -160,6 +162,7 @@ show-config:
 	@echo "SOC_FAMILY=$(SOC_FAMILY)"
 	@echo "HW_FILE=$(HW_FILE)"
 	@echo "HW_BIT=$(HW_BIT)"
+	@echo "HW_MANIFEST=$(HW_MANIFEST)"
 	@echo "CONSOLE_UART=$(CONSOLE_UART)"
 	@echo "CONSOLE_TTY=$(CONSOLE_TTY)"
 	@echo "CONSOLE_UART_BASE=$(CONSOLE_UART_BASE)"
@@ -319,11 +322,14 @@ $(ROOTFS_CPIO): $(BUILDROOT_DEFCONFIG_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(
 $(ROOTFS_EXT4): $(ROOTFS_CPIO)
 	test -s "$@"
 
-$(HARDWARE_FILE): $(HW_FILE) | $(BUILD_DIR)
-	cp $< $@
+$(HARDWARE_FILE): $(HW_FILE) $(HW_MANIFEST) scripts/hardware_input.py | $(BUILD_DIR)
+	python3 scripts/hardware_input.py --xsa "$(HW_FILE)" --manifest "$(HW_MANIFEST)"
+	cp "$(HW_FILE)" "$@"
 
-$(BITSTREAM_FILE): $(HW_BIT) | $(BUILD_DIR)
-	cp $< $@
+$(BITSTREAM_FILE): $(HARDWARE_FILE) $(HW_MANIFEST) scripts/hardware_input.py | $(BUILD_DIR)
+	python3 scripts/hardware_input.py --xsa "$(HARDWARE_FILE)" --manifest "$(HW_MANIFEST)" --output-bit "$@"
+
+hardware: $(HARDWARE_FILE) $(BITSTREAM_FILE)
 
 $(LINUX_CONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(LINUX_FETCH_STAMP) $(DTC_COMPAT_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(BOARD_DIR)/apply-linux-patches.sh $(CURDIR)/../app/include/linux/fpv_capture.h $(LINUX_PATCH_FILES) $(BOARD_LINUX_FILES) | check-source-board $(STAMP_DIR)
 	# Apply Linux kernel patches if available

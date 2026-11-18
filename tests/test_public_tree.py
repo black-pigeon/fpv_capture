@@ -3,6 +3,8 @@ from pathlib import Path
 import subprocess
 import tempfile
 import unittest
+import json
+from test_hardware_input import hardware_fixture
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'tools/check_public_tree.py'
 
@@ -21,6 +23,9 @@ class PublicTreeTest(unittest.TestCase):
                     path.parent.mkdir(parents=True, exist_ok=True)
                     path.write_bytes(data)
             subprocess.run(['git', '-C', str(root), 'add', '--', name], check=True)
+            public_manifest = 'firmware/board/e200/hardware/manifest.json'
+            if extra and public_manifest in extra:
+                subprocess.run(['git', '-C', str(root), 'add', '--', public_manifest], check=True)
             return subprocess.run(['python3', str(SCRIPT), '--root', str(root)], capture_output=True, text=True)
 
     def test_application_interface_and_public_patch_allowed(self):
@@ -28,10 +33,24 @@ class PublicTreeTest(unittest.TestCase):
             ('app/include/linux/fpv_capture.h', b'struct capture_request { unsigned channel; };\n'),
             ('firmware/board/e200/linux/system-user.dtsi', b'/ { model = "E200"; };\n'),
             ('firmware/board/e200/patches/linux/board.patch', b'+CONFIG_REALTEK_PHY=y\n'),
+            ('firmware/board/e200/linux/fpv_capture/fpv_capture.c', b'MODULE_' + b'LICENSE("GPL");\n'),
         ):
             with self.subTest(name=name):
                 result = self.check_content(name, data)
                 self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_only_validated_xsa_is_allowed(self):
+        xsa, manifest = hardware_fixture()
+        name = 'firmware/board/e200/hardware/e200_fpv.xsa'
+        extra = {'firmware/board/e200/hardware/manifest.json': json.dumps(manifest).encode()}
+        result = self.check_content(name, xsa, extra)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertNotEqual(self.check_content(name, xsa).returncode, 0)
+        self.assertNotEqual(self.check_content(name, xsa + b'tampered', extra).returncode, 0)
+        xsa, manifest = hardware_fixture({'design.v': b'private source'})
+        extra['firmware/board/e200/hardware/manifest.json'] = json.dumps(manifest).encode()
+        self.assertNotEqual(self.check_content(name, xsa, extra).returncode, 0)
+        self.assertNotEqual(self.check_content('app/renamed.xsa', xsa).returncode, 0)
 
     def test_private_paths_and_archives_rejected(self):
         for name in (
@@ -58,9 +77,9 @@ class PublicTreeTest(unittest.TestCase):
         ):
             with self.subTest(name=name):
                 self.assertNotEqual(self.check_content(name, data).returncode, 0)
-        copied = b'static int proprietary_function(void) { return 17; }\n'
+        copied = b'// local private RTL marker\n'
         result = self.check_content('app/renamed-driver.txt', copied,
-            {'firmware/board/e200/linux/axi_dma/original.c': copied})
+            {'fpga/e200_fpv/src/fpv/original.v': copied})
         self.assertNotEqual(result.returncode, 0)
 
 

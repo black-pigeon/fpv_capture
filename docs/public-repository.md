@@ -1,56 +1,89 @@
-# Repository contents and private dependencies
+# Public source and FPGA release boundary
 
-This commit tracks the userspace application and firmware integration. It does not include project-owned FPGA or custom Linux driver implementation. The exclusion applies to source copies inside patches, archives and generated/debug artifacts as well as original files. Existing files remain in the private development workspace; ignoring a path does not delete it.
+The public firmware build uses application and capture-driver source plus one reviewed FPGA hardware handoff, `firmware/board/e200/hardware/e200_fpv.xsa`. It does not require the FPGA source project. The adjacent `manifest.json` pins the XSA, its embedded bitstream and the supported interface versions.
 
 ## Included
 
-- Userspace no-OS radio integration, scanner, frame parser, capture CLI and HTTP service.
-- English offline web assets and application tests.
-- `app/include/linux/fpv_capture.h`: ioctl/data interface declarations required by applications, not the driver implementation.
-- E200 device-tree integration, boot configuration, Buildroot overlay/packages and public upstream version lock/build scripts.
-- Generic source/build tests, this contents guide and Git publication checks.
+- Userspace ADI no-OS AD9361 control, scanner, frame parser, capture CLI, HTTP service and English offline web assets.
+- `firmware/board/e200/linux/fpv_capture/`: the active GPL-2.0 DMAengine capture client, its Kconfig/Makefile and license text. It builds into the kernel as `CONFIG_FPV_CAPTURE=y`; upstream `CONFIG_XILINX_DMA=y` supplies the AXI DMA provider.
+- `app/include/linux/fpv_capture.h`: the canonical userspace ioctl/data interface, copied into the kernel driver during integration.
+- Host application and capture-driver tests.
+- E200 device-tree/boot configuration, Buildroot packages/overlay, source version locks and firmware/packaging scripts.
+- One XSA and its public hash/compatibility manifest. The XSA contains the bitstream, hardware/address descriptions and generated PS initialization files. It is not an opaque container and reveals hardware integration information; it does not include the FPGA RTL project.
 
-Third-party source files keep their existing copyright/license headers. This commit does not add a blanket open-source license or change the terms of project-owned files.
+Third-party sources retain their existing notices. The capture driver retains its GPL-2.0 declaration; its `COPYING` provides the GPLv2 text. No blanket license is added to other project-owned files.
 
-## Excluded and retained locally
+## Retained locally
 
-| Local path | Reason |
+| Local path | Contents |
 |---|---|
-| `fpga/` | All RTL, IP, constraints, block design, reconstruction scripts and simulations |
-| `hardware/` | Bit/XSA/LTX, PS initialization, manifests and reports with implementation/debug details |
-| `firmware/board/e200/linux/*/` | Custom `axi_dma` and `fpv_capture` kernel implementations, headers, Kconfig and Makefiles |
-| `firmware/board/e200/patches/autosave/` | Historical source patches and untracked-source archives |
-| Most of `docs/` | Internal design specs, plans, source manifests and engineering/board records |
-| Private driver/FPGA verification files | Tests coupled to excluded implementations |
-| Upstream worktrees, build outputs, editor settings and captured packets/images | Independent repositories and local development/device data |
+| `fpga/` | FPGA RTL, IP, constraints, block design, reconstruction scripts and simulations |
+| `hardware/` | Internal exports, source-hash inventories, reports and debug products |
+| `firmware/board/e200/linux/axi_dma/` | Unused legacy driver with conflicting third-party distribution notices; not required by the active capture path |
+| `firmware/board/e200/patches/autosave/` | Historical source patches and source archives |
+| Most of `docs/` | Internal designs, plans and engineering records |
+| FPGA-dependent verification, upstream checkouts and build/device data | Local development inputs and outputs |
 
-The board-level `linux/system-user.dtsi` is a device-tree integration file; it is included. Vendor userspace files named `axi_adc_core`/`axi_dac_core` belong to no-OS and are not the excluded custom AXI DMA kernel implementation.
+Ignoring a path does not delete it or back it up. Keep a separate private backup of the FPGA project. Never include `.ltx`, `.dcp`, Vivado projects, source patches or private source inventories in a public release.
 
-## Building from this source subset
+## Build complete SD boot files
 
-The README host commands build and test the application without private FPGA/kernel sources. Test binaries use fake devices or explicit simulation. A real receiver still needs the matching private bitstream, kernel and capture ABI.
+Use a Linux host with AMD Vivado and Vitis **2022.2**, including the ARM hard-float compiler. The default installation is `/opt/Xilinx`; the environment script also supports `VIVADO_SETTINGS_FILE` and `VITIS_SETTINGS_FILE`. Buildroot's external-toolchain path is configured separately in the E200 defconfig and must match the installation.
 
-For a full firmware build, provide these inputs separately through an authorized private channel:
+Install host build dependencies such as a C/C++ compiler, make, Git, Python 3, CMake, patch, flex, bison, OpenSSL development headers, device-tree-compiler (`dtc`, `fdtget`, `fdtput`), cpio, unzip, rsync, file, bc, wget and util-linux (`flock`). Buildroot reports additional host dependencies if needed. XSA validation/extraction alone only requires Python 3 and make.
 
-1. `fpga/e200_fpv/` and matching exports in `hardware/e200_fpv/` when regenerating hardware or using hardware-manifest verification.
-2. Custom kernel input directories under `firmware/board/e200/linux/axi_dma/` and `firmware/board/e200/linux/fpv_capture/`.
-3. A matching working Ethernet/device-tree/boot configuration for the board. Do not replace a verified SD device tree merely to rebuild userspace.
+From the repository root:
 
-`apply-linux-patches.sh` reports missing private driver inputs before modifying the kernel tree. Firmware/packaging scripts that verify private manifests also require their private inputs. The public subset intentionally cannot rebuild the whole system independently.
+```sh
+make -C firmware show-config
+make -C firmware hardware
+make -C firmware fetch-locked
+make -C firmware sd
+```
 
-## Check each commit
+`fetch-locked` downloads the exact commits in `firmware/sources.lock.json`; run it before the first build in a clean checkout. Do not run source-fetch/reset operations blindly over modified upstream checkouts.
 
-Enable the provided local hook once per checkout:
+The build validates the XSA, extracts its bitstream into `firmware/build/e200/`, generates FSBL and the device tree from the XSA, compiles U-Boot/Linux/the capture driver, and builds the application and rootfs. No FPGA synthesis/implementation runs, and no precompiled `.ko` is needed. Kernel configuration changes are possible because the active capture driver is provided as source; keep the capture/DMA/device-tree interfaces compatible.
+
+The six boot files are written to `firmware/build/e200/sd/`:
+
+```text
+BOOT.BIN
+e200_fpv.bit
+zImage
+devicetree.dtb
+rootfs.cpio.gz
+uEnv.txt
+```
+
+The `.bit` is a generated output extracted from the XSA, not a second FPGA input to distribute. Keep all six files from the same build together. The canonical Ethernet device tree uses the board-tested `rgmii-id` setting.
+
+To select another reviewed handoff, supply **both** files consistently on every build command:
+
+```sh
+make -C firmware hardware HW_FILE=/absolute/path/e200_fpv.xsa HW_MANIFEST=/absolute/path/manifest.json
+make -C firmware sd HW_FILE=/absolute/path/e200_fpv.xsa HW_MANIFEST=/absolute/path/manifest.json
+```
+
+XSA membership is intentionally restricted to the current E200 handoff format. A new FPGA release requires a reviewed manifest and compatible register/frame interfaces. Changing a hash does not prove the design works: validate new hardware privately before publishing it.
+
+The optional packaging scripts validate the released XSA instead of private FPGA source hashes:
+
+```sh
+python3 firmware/scripts/package_test_sd.py --verify-only
+python3 firmware/scripts/package_rootfs_update.py --verify-only
+```
+
+Both accept `--xsa` and `--hardware-manifest` for an alternate handoff. Host tests and archive checks are not board/RF qualification. A rootfs-only update must preserve the currently working kernel, bitstream, device tree and boot files.
+
+## Check the publication boundary
 
 ```sh
 git config --local core.hooksPath .githooks
-```
-
-Stage explicit application/integration paths, then run:
-
-```sh
 python3 tools/check_public_tree.py
 git diff --cached --stat
 ```
 
-The guard inspects indexed paths and content and rejects hardware/kernel source, private archive/binary artifacts, internal documentation, credential files/private keys and source copies matching local private implementation. It supplements `.gitignore` by also rejecting a forced add. It does not make untracked private files recoverable from Git and does not publish anything. Preserve those files using a separate private backup process.
+The guard inspects the **Git index**. It permits only the named capture-driver files and the exact XSA/manifest pair; the indexed XSA must match its manifest and pass archive-member checks. It rejects other hardware exports, RTL, internal paths, binary/archive content, private keys and byte-identical copies of known local FPGA sources. Review the staged diff as well: this guard is a practical safeguard, not a proof that arbitrary text contains no confidential information.
+
+Publishing this source and XSA allows rebuilding the firmware software and reusing the released FPGA design. It does not allow rebuilding or modifying FPGA logic without the private FPGA project.

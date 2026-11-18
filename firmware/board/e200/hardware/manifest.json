@@ -1,0 +1,26 @@
+{
+  "format": "e200-fpv-xsa-v1",
+  "board": "e200",
+  "xsa": {
+    "file": "e200_fpv.xsa",
+    "sha256": "85a5fe272a1a669613b9ffbab98979ede7bd39aa5930d212d31af5f0a2f85928",
+    "bytes": 1524089
+  },
+  "bitstream": {
+    "member": "e200_fpv.bit",
+    "sha256": "36e09865a8dd483d67e65578905f827d279eeb848fb5175542610746eb1f9bcf",
+    "bytes": 2597346
+  },
+  "capture": {
+    "register_version": 6,
+    "packet_version": 2,
+    "channels": 4,
+    "dma_count": 1
+  },
+  "ethernet": {
+    "phy_mode": "rgmii-id",
+    "phy_address": 1,
+    "converter_address": 8,
+    "forced_phy_id": false
+  }
+}

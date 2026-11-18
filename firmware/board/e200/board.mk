@@ -4,11 +4,12 @@ BOARD_DESC := ANTSDR E200 Zynq-7000 firmware builder
 SOC_FAMILY := zynq
 BOOTGEN_ARCH := zynq
 
-# Only matching artifacts exported by this project's FPGA build are accepted.
-HW_PROJECT_DIR := $(abspath $(CURDIR)/../fpga/e200_fpv)
-HW_ARTIFACT_DIR := $(abspath $(CURDIR)/../hardware/e200_fpv)
+# The public firmware build consumes a single reviewed XSA, not FPGA source.
+HW_ARTIFACT_DIR := $(CURDIR)/board/e200/hardware
 HW_FILE := $(HW_ARTIFACT_DIR)/e200_fpv.xsa
-HW_BIT := $(HW_ARTIFACT_DIR)/e200_fpv.bit
+HW_MANIFEST := $(HW_ARTIFACT_DIR)/manifest.json
+# Generated from the XSA; never a separately supplied hardware input.
+HW_BIT = $(BUILD_DIR)/e200_fpv.bit
 
 FSBL_PROC := ps7_cortexa9_0
 DT_PROC := ps7_cortexa9_0
@@ -22,7 +23,7 @@ LINUX_IMAGE_PATH := arch/arm/boot/zImage
 UBOOT_DEFCONFIG := xilinx_zynq_virt_defconfig
 UBOOT_DTS_NAME := zynq-e200
 
-LINUX_CONFIG_ENABLES := DMADEVICES XILINX_DMA FPV_CAPTURE MACB XILINX_GMII2RGMII REALTEK_PHY SPI_SPIDEV GPIO_CDEV MTD MTD_SPI_NOR SPI_ZYNQ_QSPI
+LINUX_CONFIG_ENABLES := DMADEVICES XILINX_DMA FPV_CAPTURE MACB XILINX_GMII2RGMII REALTEK_PHY SPI_SPIDEV GPIO_CDEV NEW_LEDS LEDS_CLASS LEDS_GPIO LEDS_TRIGGERS LEDS_TRIGGER_HEARTBEAT MTD MTD_SPI_NOR SPI_ZYNQ_QSPI
 
 BUILDROOT_CROSS := arm-linux-gnueabihf-
 VITIS_AARCH64_LINUX_DIR := /opt/Xilinx/Vitis/2022.2/gnu/aarch32/lin/gcc-arm-linux-gnueabi

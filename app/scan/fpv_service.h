@@ -14,15 +14,18 @@ struct fpv_service {
     pthread_cond_t condition;
     pthread_t worker;
     struct fpv_backend backend;
-    struct fpv_scan_config config;
+    struct fpv_scan_config config, pending_config;
     struct fpv_scan_hop current;
     struct fpv_track tracks[FPV_SCAN_TRACKS];
     unsigned next_id, completed, total, rounds, capture_errors, rf_tunes, ddc_tunes;
-    int running, stopping, quitting;
+    unsigned captured_frames;
+    int running, stopping, quitting, reconfigure, lock_ready, signal_present;
     char phase[32], error[192];
 };
 int fpv_service_init(struct fpv_service *s,int simulate);
 void fpv_service_destroy(struct fpv_service *s);
+/* Starts idle acquisition or queues scan->lock, lock->scan and lock->lock.
+ * The worker owns tuning; inspect status.switching before another command. */
 int fpv_service_start(struct fpv_service *s,const struct fpv_scan_config *c);
 void fpv_service_stop(struct fpv_service *s);
 int fpv_service_clear(struct fpv_service *s);

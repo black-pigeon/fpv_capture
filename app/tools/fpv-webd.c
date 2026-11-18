@@ -85,7 +85,7 @@ static void client(int fd,struct fpv_service *s,const char *root)
         if(!strcmp(path,"/api/start")) {
             struct fpv_scan_config cfg;char error[256];
             if(fpv_scan_config_parse(req+header_len,&cfg,error,sizeof(error))<0){message(fd,400,error);return;}
-            if(fpv_service_start(s,&cfg)<0){message(fd,409,"Scan is running. Stop it before changing settings.");return;}
+            if(fpv_service_start(s,&cfg)<0){message(fd,409,"Acquisition is busy. Wait for switching/stopping, or stop before starting another scan.");return;}
         } else if(!strcmp(path,"/api/stop"))fpv_service_stop(s);
         else if(!strcmp(path,"/api/clear")){if(fpv_service_clear(s)<0){message(fd,409,"Stop the scan first.");return;}}
         else {message(fd,404,"Not found");return;}

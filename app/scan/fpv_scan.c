@@ -9,7 +9,7 @@
 void fpv_scan_defaults(struct fpv_scan_config *c)
 {
     memset(c,0,sizeof(*c)); c->bands[0]=(struct fpv_scan_band){5650000000ULL,5950000000ULL};
-    c->band_count=1;c->step_hz=2000000;c->dwell_ms=150;c->settle_ms=20;c->gain_db=20;c->repeat=1;
+    c->band_count=1;c->step_hz=6000000;c->dwell_ms=150;c->settle_ms=20;c->gain_db=20;c->repeat=1;
 }
 static unsigned band_points(const struct fpv_scan_config *c,unsigned b)
 {
@@ -18,6 +18,7 @@ static unsigned band_points(const struct fpv_scan_config *c,unsigned b)
 }
 unsigned fpv_scan_points(const struct fpv_scan_config *c)
 {
+    if(c->mode==FPV_SCAN_MODE_LOCK)return 1;
     unsigned n=0;for(unsigned b=0;b<c->band_count;b++)n+=band_points(c,b);return n;
 }
 static int hex(int c) { if(c>='0'&&c<='9')return c-'0';c=tolower((unsigned char)c);return c>='a'&&c<='f'?c-'a'+10:-1; }
@@ -70,28 +71,42 @@ int fpv_scan_config_parse(const char *body,struct fpv_scan_config *c,char *error
             bit=16;if(number(value,0,60,&v)||v!=floor(v))goto bad;c->gain_db=(unsigned)v;
         } else if(!strcmp(p,"repeat")) {
             bit=32;if(number(value,0,1,&v)||v!=floor(v))goto bad;c->repeat=(unsigned)v;
+        } else if(!strcmp(p,"mode")) {
+            bit=64;
+            if(!strcmp(value,"lock"))c->mode=FPV_SCAN_MODE_LOCK;
+            else if(!strcmp(value,"scan"))c->mode=FPV_SCAN_MODE_SCAN;
+            else goto bad;
+        } else if(!strcmp(p,"frequency_mhz")) {
+            bit=128;if(number(value,70,6000,&v))goto bad;c->lock_hz=(uint64_t)llround(v*1e6);
         } else goto bad;
         if(seen&bit)goto bad;
         seen|=bit;
     }
-    if(!(seen&1)||fpv_scan_points(c)>65536)goto bad;
+    if(c->mode==FPV_SCAN_MODE_LOCK) { if(!(seen&128))goto bad; }
+    else if(!(seen&1)||(seen&128)||fpv_scan_points(c)>65536)goto bad;
     if(cap)error[0]=0;
     return 0;
 bad:
-    snprintf(error,cap,"Invalid settings: bands 70..6000 MHz, grid 0.1..10 MHz, observation 100..1000 ms, gain 0..60 dB; up to 8 bands / 65536 points.");
+    snprintf(error,cap,"Invalid settings: mode scan/lock; lock requires frequency_mhz 70..6000; bands 70..6000 MHz, grid 0.1..10 MHz, observation 100..1000 ms, gain 0..60 dB; up to 8 bands / 65536 points.");
     return -1;
 }
 int fpv_scan_plan(const struct fpv_scan_config *c,unsigned point,struct fpv_scan_hop *h)
 {
     memset(h,0,sizeof(*h));
+    if(c->mode==FPV_SCAN_MODE_LOCK) {
+        if(point || c->lock_hz<70000000 || c->lock_hz>6000000000ULL)return -1;
+        h->lo_hz=h->target_hz[0]=h->actual_hz[0]=c->lock_hz;
+        h->count=h->enable_mask=h->phases=1;
+        return 0;
+    }
     unsigned b;
     for(b=0;b<c->band_count;b++){unsigned n=band_points(c,b);if(point<n)break;point-=n;}
     if(b==c->band_count)return -1;
-    /* Full windows contain a multiple of four points so no observation
-     * slots are wasted. Four contiguous grid lanes are visited in parallel;
-     * changing phase walks each lane with the requested fine grid step. */
+    /* Fill the RF window before moving its LO. Split its entire grid into
+     * four lanes and walk each lane by one grid step per digital phase.
+     * The last phase may use fewer than four channels; rounding the window
+     * down to four centers would discard useful LO reuse at coarse grids. */
     unsigned capacity=FPV_SCAN_CENTER_SPAN_HZ/c->step_hz+1;
-    if(capacity>=4)capacity-=capacity%4;
     unsigned first=(point/capacity)*capacity;
     unsigned n=band_points(c,b)-first;if(n>capacity)n=capacity;
     unsigned local=point-first;

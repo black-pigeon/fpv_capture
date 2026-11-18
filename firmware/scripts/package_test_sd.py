@@ -9,7 +9,11 @@ from pathlib import Path
 import struct
 import subprocess
 import tarfile
-import zipfile
+
+if __package__:
+    from .hardware_input import DEFAULT_XSA, DEFAULT_MANIFEST, load_hardware
+else:
+    from hardware_input import DEFAULT_XSA, DEFAULT_MANIFEST, load_hardware
 
 ROOT = Path(__file__).resolve().parents[2]
 CORE = ('BOOT.BIN', 'e200_fpv.bit', 'zImage', 'devicetree.dtb', 'rootfs.cpio.gz', 'uEnv.txt')
@@ -36,14 +40,14 @@ def cpio_files(path):
         name = name.removeprefix('./')
         files[name], modes[name] = data, mode
 
-def verify_ethernet_dtb(dtb):
+def verify_ethernet_dtb(dtb, expected_mode='rgmii-id'):
     """Check resolved DT properties, including both PHY phandles, before delivery."""
     def get(node, prop, kind='s'):
         return subprocess.check_output(['fdtget', '-t', kind, str(dtb), node, prop],
                                        text=True).strip()
     mac = get('/aliases', 'ethernet0')
     assert get(mac, 'status') == 'okay', 'GEM0 must be enabled in Linux'
-    assert get(mac, 'phy-mode') == 'rgmii-rxid', 'E200 PHY delay mode drifted'
+    assert get(mac, 'phy-mode') == expected_mode, 'E200 PHY delay mode drifted'
     bus = mac + '/mdio'
     names = subprocess.check_output(['fdtget', '-l', str(dtb), bus], text=True).split()
     assert len(names) == 2, 'expected one external PHY and one converter'
@@ -54,27 +58,15 @@ def verify_ethernet_dtb(dtb):
     assert get(bridge, 'compatible') == 'xlnx,gmii-to-rgmii-1.0'
     assert get(mac, 'phy-handle', 'x') == get(phy, 'phandle', 'x')
     assert get(bridge, 'phy-handle', 'x') == get(phy, 'phandle', 'x')
-    return {'mac': mac, 'phy_mode': 'rgmii-rxid', 'phy_address': 1,
+    return {'mac': mac, 'phy_mode': expected_mode, 'phy_address': 1,
             'converter_address': 8, 'forced_phy_id': False,
             'board_link_tested': False}
 
-def verify(sd):
+def verify(sd, xsa=DEFAULT_XSA, hardware_manifest=DEFAULT_MANIFEST):
     for name in CORE:
         assert (sd / name).stat().st_size > 0, name
-    hardware = ROOT / 'hardware/e200_fpv'
-    manifest = json.loads((hardware / 'manifest.json').read_text())
-    assert manifest['capture']['register_version'] == 6
-    assert manifest['ethernet']['phy_reset'] == 'B19 tied high (verified E200 reference)'
-    assert manifest['ethernet']['phy_mode'] == 'rgmii-rxid'
-    assert not manifest['ethernet']['forced_phy_id']
-    for name, info in manifest['artifacts'].items():
-        assert digest(hardware / name) == info['sha256'], name
-    for name, sha in manifest['local_sources'].items():
-        assert digest(ROOT / 'fpga/e200_fpv' / name) == sha, name
-    assert digest(sd / 'e200_fpv.bit') == digest(hardware / 'e200_fpv.bit')
-    with zipfile.ZipFile(hardware / 'e200_fpv.xsa') as archive:
-        bit = next(n for n in archive.namelist() if n.endswith('.bit'))
-        assert archive.read(bit) == (sd / 'e200_fpv.bit').read_bytes()
+    manifest, bitstream = load_hardware(xsa, hardware_manifest)
+    assert (sd / 'e200_fpv.bit').read_bytes() == bitstream, 'SD bitstream differs from released XSA'
     assert (sd / 'devicetree.dtb').read_bytes() == (ROOT / 'firmware/build/e200/system-top.dtb').read_bytes()
     verify_ethernet_dtb(sd / 'devicetree.dtb')
     files, modes = cpio_files(sd / 'rootfs.cpio.gz')
@@ -95,18 +87,20 @@ def verify(sd):
     assert not any('libiio' in name for name in files)
     assert (sd / 'zImage').read_bytes() == (ROOT / 'firmware/linux/arch/arm/boot/zImage').read_bytes()
     assert struct.unpack_from('<I', (sd / 'BOOT.BIN').read_bytes(), 0x20)[0] == 0xaa995566
-    print(f'PASS: matched v6 FPGA/source hashes, {len(files)} initramfs entries, ARM apps, web/init assets, Ethernet DT and diagnostics, kernel and boot header')
+    print(f'PASS: matched public XSA/bitstream and v6 ABI, {len(files)} initramfs entries, ARM apps, web/init assets, Ethernet DT and diagnostics, kernel and boot header')
     return manifest
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--name', default='e200-fpv-webscan-20261117')
     parser.add_argument('--verify-only', action='store_true')
+    parser.add_argument('--xsa', type=Path, default=DEFAULT_XSA)
+    parser.add_argument('--hardware-manifest', type=Path, default=DEFAULT_MANIFEST)
     args = parser.parse_args()
     if '/' in args.name or args.name in ('.', '..'):
         parser.error('name must be a filename prefix')
     sd = ROOT / 'firmware/build/e200/sd'
-    manifest = verify(sd)
+    manifest = verify(sd, args.xsa, args.hardware_manifest)
     if args.verify_only:
         return
     out = ROOT / 'firmware/build/e200/images'
