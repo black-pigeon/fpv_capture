@@ -43,6 +43,14 @@ class E310FirmwareTest(unittest.TestCase):
         self.assertTrue(header.is_file())
         self.assertEqual(header.read_bytes(), (FW / 'board/e200/buildroot/dropbear-localoptions.h').read_bytes())
 
+    def test_heartbeat_driver_is_built_into_kernel(self):
+        config = (FW / 'board/e310/board.mk').read_text()
+        enabled = next(line.split(':=', 1)[1].split() for line in config.splitlines()
+                       if line.startswith('LINUX_CONFIG_ENABLES :='))
+        for option in ('NEW_LEDS', 'LEDS_CLASS', 'LEDS_GPIO', 'LEDS_TRIGGERS',
+                       'LEDS_TRIGGER_HEARTBEAT'):
+            self.assertIn(option, enabled)
+
     def test_uart1_alias_matches_linux_tty(self):
         with tempfile.TemporaryDirectory() as directory:
             for mode, source in [('linux-dtsi', 'linux/system-user.dtsi'),
@@ -82,6 +90,11 @@ class E310FirmwareTest(unittest.TestCase):
                 result = run('fdtget', '-t', kind, dtb, node, prop)
                 self.assertEqual(result.returncode, 0, result.stderr)
                 return result.stdout.strip()
+            self.assertEqual(get('/leds', 'compatible'), 'gpio-leds')
+            self.assertEqual(get('/leds/led0', 'gpios', 'u').split(),
+                             [get('/gpio', 'phandle', 'u'), '15', '0'])
+            self.assertEqual(get('/leds/led0', 'linux,default-trigger'), 'heartbeat')
+            self.assertEqual(get('/leds/led0', 'label'), 'led0:green')
             mac = '/ethernet@e000b000'
             phy = mac + '/mdio/ethernet-phy@0'
             self.assertEqual(get(mac, 'status'), 'okay')

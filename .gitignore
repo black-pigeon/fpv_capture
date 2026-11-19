@@ -37,9 +37,11 @@ __pycache__/
 
 # Internal designs, implementation plans, manifests and lab records.
 /docs/*
-!/docs/public-repository.md
 
 # Verification sources that expose/depend on private implementation.
 /tests/test_fpga_export.py
 /tests/test_e200_ethernet.py
 /tests/check_capture_packets.py
+
+# SD boot archives are retained locally for GitHub Release attachments.
+/images/

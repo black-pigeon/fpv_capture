@@ -32,7 +32,7 @@ PUBLIC_DRIVER_FILES = {
 }
 
 PRIVATE_PREFIXES = (
-    'fpga/', 'hardware/', 'firmware/board/e200/patches/autosave/',
+    'fpga/', 'hardware/', 'images/', 'firmware/board/e200/patches/autosave/',
     'firmware/u-boot/', 'firmware/linux/', 'firmware/buildroot/',
     'firmware/embeddedsw/', 'firmware/device-tree-xlnx/', 'firmware/build/',
     'firmware/.source-stamps/', 'build/', '.vscode/', '.Xil/',
@@ -61,7 +61,9 @@ def path_reason(name):
     if name.startswith(PRIVATE_PREFIXES) or name in PRIVATE_FILES:
         return 'private/local path'
     if name.startswith('docs/'):
-        return None if name == 'docs/public-repository.md' else 'internal documentation'
+        return 'internal documentation'
+    if name.endswith('.md') and name != 'README.md':
+        return 'documentation belongs in the top-level README'
     if name in ('.gitignore', 'README.md'):
         return None
     if p.parts[0] not in ALLOWED_ROOTS:

@@ -153,6 +153,8 @@ class PublicTreeTest(unittest.TestCase):
     def test_private_paths_and_archives_rejected(self):
         for name in (
             'fpga/example.txt', 'hardware/example.txt',
+            'images/e200-fpv-20261119-bootfiles.tar.gz',
+            'docs/public-repository.md', 'tools/fpv_receiver/README.md',
             'firmware/board/e200/linux/axi_dma/driver.c',
             'firmware/board/e200/linux/fpv_capture/driver.c',
             'firmware/board/e200/patches/autosave/source.patch',

@@ -17,6 +17,17 @@
 		spi1 = &qspi;
 	};
 
+	// Original E310 green status LED: PS MIO15, active high.
+	leds {
+		compatible = "gpio-leds";
+		led0 {
+			label = "led0:green";
+			gpios = <&gpio0 15 0>;
+			linux,default-trigger = "heartbeat";
+			default-state = "off";
+		};
+	};
+
 	// DTG emits an unqualified memory node; replace it, avoiding overlapping banks.
 	/delete-node/ memory;
 	// ant reference: 32-bit MT41J256M16 RE-125 DDR, 1 GiB total.
