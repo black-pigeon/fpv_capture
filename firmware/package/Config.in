@@ -1,0 +1,5 @@
+config BR2_FPV_BOARD
+	string "FPV application board profile"
+	default "e200"
+	help
+	  CMake FPV_BOARD used by the shared receiver applications (e200 or e310).

@@ -1,5 +1,12 @@
 cmake_minimum_required(VERSION 3.16)
-project(e200_fpv C)
+project(fpv_capture C)
+set(FPV_BOARD "e200" CACHE STRING "FPV receiver board: e200 or e310")
+set_property(CACHE FPV_BOARD PROPERTY STRINGS e200 e310)
+if(FPV_BOARD STREQUAL "e310")
+    add_compile_definitions(FPV_TARGET_E310=1)
+elseif(NOT FPV_BOARD STREQUAL "e200")
+    message(FATAL_ERROR "Unsupported FPV_BOARD: ${FPV_BOARD}")
+endif()
 set(CMAKE_C_STANDARD 11)
 set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS ON)
@@ -10,6 +17,9 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 add_library(e200-no-os STATIC
     radio/e200_ad9361_config.c
     radio/e200_radio.c
+    radio/fpv_board.c
+    radio/fpv_frontend.c
+    radio/fpv_radio.c
     radio/lib/platform/e200_ad9361_defaults.c
     radio/lib/ad9361/ad9361.c
     radio/lib/ad9361/ad9361_api.c
@@ -62,8 +72,8 @@ if(NOT CMAKE_CROSSCOMPILING)
 endif()
 
 find_package(Threads REQUIRED)
-add_library(fpv-scan STATIC scan/fpv_scan.c scan/fpv_backend.c scan/fpv_service.c)
-target_include_directories(fpv-scan PUBLIC scan)
+add_library(fpv-scan STATIC scan/fpv_scan.c scan/fpv_backend.c scan/fpv_service.c net/fpv_feed.c net/fpv_stream.c)
+target_include_directories(fpv-scan PUBLIC scan net)
 target_compile_definitions(fpv-scan PRIVATE _GNU_SOURCE)
 target_link_libraries(fpv-scan PUBLIC fpv-frame e200-no-os Threads::Threads)
 target_compile_options(fpv-scan PRIVATE -Wall -Wextra -Werror)
@@ -75,6 +85,13 @@ install(TARGETS fpv-webd RUNTIME DESTINATION sbin)
 install(DIRECTORY web/ DESTINATION share/e200-fpv/web)
 add_test(NAME web-help COMMAND fpv-webd --help)
 if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test-fpv-feed tests/test_feed.c)
+    target_link_libraries(test-fpv-feed PRIVATE fpv-scan)
+    target_compile_options(test-fpv-feed PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    add_test(NAME network-frame-feed COMMAND test-fpv-feed)
+    add_test(NAME network-frame-stream COMMAND ${Python3_EXECUTABLE}
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_stream.py $<TARGET_FILE:fpv-webd>
+        ${CMAKE_CURRENT_SOURCE_DIR}/web)
     add_executable(test-fpv-scan tests/test_scan.c)
     target_link_libraries(test-fpv-scan PRIVATE fpv-scan)
     target_compile_options(test-fpv-scan PRIVATE -Wall -Wextra -Werror -UNDEBUG)
@@ -90,4 +107,20 @@ if(NOT CMAKE_CROSSCOMPILING)
     add_test(NAME web-simulated COMMAND ${Python3_EXECUTABLE}
         ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_web.py $<TARGET_FILE:fpv-webd>
         ${CMAKE_CURRENT_SOURCE_DIR}/web)
+    set_tests_properties(web-simulated PROPERTIES ENVIRONMENT "FPV_EXPECT_BOARD=${FPV_BOARD}")
+endif()
+
+if(NOT CMAKE_CROSSCOMPILING)
+    foreach(case frontend radio radio_config)
+        add_executable(test-fpv-${case} tests/test_${case}.c)
+        target_link_libraries(test-fpv-${case} PRIVATE e200-no-os)
+        target_compile_options(test-fpv-${case} PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+        add_test(NAME board-${case} COMMAND test-fpv-${case})
+    endforeach()
+endif()
+if(NOT CMAKE_CROSSCOMPILING)
+    add_executable(test-fpv-scan-routes tests/test_scan_routes.c)
+    target_link_libraries(test-fpv-scan-routes PRIVATE fpv-scan)
+    target_compile_options(test-fpv-scan-routes PRIVATE -Wall -Wextra -Werror -UNDEBUG)
+    add_test(NAME scan-rf-routes COMMAND test-fpv-scan-routes)
 endif()

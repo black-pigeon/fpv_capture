@@ -7,7 +7,7 @@
 #include <string.h>
 
 #include "ad9361_api.h"
-#include "e200_radio.h"
+#include "fpv_radio.h"
 #include "axi_dac_core.h"
 #include "e200_ad9361_config.h"
 #include "linux_gpio.h"
@@ -17,7 +17,7 @@
 #define DEFAULT_RX_GAIN_DB      20
 #define DEFAULT_TX_ATTEN_MDB    10000U
 
-static struct ad9361_rf_phy *phy;
+static struct fpv_radio radio;
 
 static uint64_t parse_u64(const char *arg, const char *name)
 {
@@ -127,25 +127,24 @@ int main(int argc, char **argv)
 
 	setenv("NO_OS_GPIOCHIP", "/dev/gpiochip0", 0);
 
-	printf("E200 AD9361 init: rx_lo=%" PRIu64 " tx_lo=%" PRIu64
+	printf("%s AD9361 init: rx_lo=%" PRIu64 " tx_lo=%" PRIu64
 	       " sample_rate=%" PRIu32 " bandwidth=%" PRIu32
 	       " rx_gain=%" PRIu32 " tx_atten=%" PRIu32 "\n",
-	       rx_lo, tx_lo, sample_rate, bandwidth, rx_gain, tx_atten_mdb);
+	       fpv_board_current()->name, rx_lo, tx_lo, sample_rate, bandwidth, rx_gain, tx_atten_mdb);
 
-	if (e200_radio_init(&phy, rx_lo, tx_lo, sample_rate, bandwidth, rx_gain,
+	if (fpv_radio_init(&radio, fpv_board_current(), rx_lo, tx_lo, sample_rate, bandwidth, rx_gain,
 			tx_atten_mdb, enable_fir) < 0) {
-		if (phy)
-			ad9361_remove(phy);
+		fpv_radio_close(&radio);
 		return 1;
 	}
 
-	printf("E200 AD9361 init done\n");
+	printf("%s AD9361 init done; RX port %c\n", fpv_board_current()->name, 'A'+radio.port);
 
 	if (keep_running) {
 		for (;;)
 			no_os_mdelay(1000);
 	}
 
-	ad9361_remove(phy);
+	fpv_radio_close(&radio);
 	return 0;
 }

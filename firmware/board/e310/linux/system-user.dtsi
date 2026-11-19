@@ -1,0 +1,87 @@
+// Original ANTSDR E310: PS GEM0 MIO16..27, MDIO MIO52/53, UART1 MIO12/13.
+/ {
+	model = "ANTSDR E310";
+	compatible = "microphase,antsdr-e310", "xlnx,zynq-7000";
+
+	chosen {
+		bootargs = "console=ttyPS1,115200 earlycon=cdns,mmio,0xe0001000 root=/dev/ram rw cma=128M";
+		stdout-path = "serial1:115200n8";
+	};
+
+	aliases {
+		ethernet0 = &gem0;
+		serial0 = &uart0;
+		serial1 = &uart1;
+		mmc0 = &sdhci0;
+		spi0 = &spi0;
+		spi1 = &qspi;
+	};
+
+	// DTG emits an unqualified memory node; replace it, avoiding overlapping banks.
+	/delete-node/ memory;
+	// ant reference: 32-bit MT41J256M16 RE-125 DDR, 1 GiB total.
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x40000000>;
+	};
+};
+
+&sdhci0 {
+	status = "okay";
+	disable-wp;
+};
+
+&uart0 { status = "disabled"; };
+&uart1 { status = "okay"; };
+
+&spi0 {
+	status = "okay";
+	num-cs = <1>;
+	is-decoded-cs = <0>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	// spidev0.0 is the userspace no-OS transport; no kernel AD9361/IIO node.
+	// Controller offsets reset100, sync99, en_agc98, ctl94, status86;
+	// RX switches54/55/58/59 are owned by the app (LVDS E310 reference).
+	ad9361_spi: ad9361@0 {
+		compatible = "rohm,dh2228fv";
+		reg = <0>;
+		spi-max-frequency = <20000000>;
+	};
+};
+
+&gpio0 { status = "okay"; };
+&clkc { fclk-enable = <0xf>; };
+
+// Direct MIO RGMII link: there is no PL GMII/RGMII converter.
+&gem0 {
+	status = "okay";
+	phy-mode = "rgmii-id";
+	phy-handle = <&marvell_phy>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		marvell_phy: ethernet-phy@0 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <0>;
+			reset-gpios = <&gpio0 46 1>; // MIO46, active low
+			reset-assert-us = <10000>;
+			reset-deassert-us = <10000>;
+		};
+	};
+};
+
+/ {
+	// Keep the shared capture ABI and AXI map. DMA/IRQ come from the XSA.
+	fpv_capture: fpv-capture@43c30000 {
+		compatible = "fpv,e200-capture-1.0";
+		reg = <0x43c30000 0x10000>;
+		dmas = <&fpv_dma 1>; // S2MM
+		dma-names = "rx";
+		status = "okay";
+	};
+};

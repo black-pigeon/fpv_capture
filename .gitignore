@@ -22,6 +22,7 @@
 /firmware/.source-stamps/
 /firmware/.fetch.lock
 /build/
+/fpv-recordings/
 /.vscode/
 .Xil/
 /*.gen/

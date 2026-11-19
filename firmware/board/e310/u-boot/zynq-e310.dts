@@ -1,0 +1,56 @@
+// SPDX-License-Identifier: GPL-2.0+
+/* Original ANTSDR E310 (ant): MIO GEM0, UART1, 32-bit 1 GiB DDR. */
+/dts-v1/;
+#include "zynq-7000.dtsi"
+
+/ {
+	model = "ANTSDR E310";
+	compatible = "microphase,antsdr-e310", "xlnx,zynq-7000";
+	aliases {
+		ethernet0 = &gem0;
+		serial0 = &uart0;
+		serial1 = &uart1;
+		mmc0 = &sdhci0;
+	};
+	chosen {
+		bootargs = "";
+		stdout-path = "serial1:115200n8";
+	};
+	memory@0 {
+		device_type = "memory";
+		reg = <0x0 0x40000000>;
+	};
+};
+
+&clkc { ps-clk-frequency = <33333333>; };
+&gpio0 { status = "okay"; };
+&sdhci0 {
+	u-boot,dm-pre-reloc;
+	status = "okay";
+	disable-wp;
+};
+&uart0 { status = "disabled"; };
+&uart1 {
+	u-boot,dm-pre-reloc;
+	status = "okay";
+};
+
+// GEM0 is available before the PL bitstream is loaded.
+&gem0 {
+	status = "okay";
+	phy-mode = "rgmii-id";
+	phy-handle = <&marvell_phy>;
+	#address-cells = <1>;
+	#size-cells = <0>;
+	mdio {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		marvell_phy: ethernet-phy@0 {
+			compatible = "ethernet-phy-ieee802.3-c22";
+			reg = <0>;
+			reset-gpios = <&gpio0 46 1>;
+			reset-assert-us = <10000>;
+			reset-deassert-us = <10000>;
+		};
+	};
+};

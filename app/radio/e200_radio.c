@@ -14,6 +14,7 @@
 #include "no_os_gpio.h"
 
 #include "e200_radio.h"
+#include "fpv_radio.h"
 
 static int check_step(const char *step, int ret)
 {
@@ -25,12 +26,12 @@ static int check_step(const char *step, int ret)
 	return 0;
 }
 
-static int configure_gpio_outputs(void)
+static int configure_gpio_outputs(const struct fpv_board *board)
 {
 	struct no_os_gpio_desc *en_agc = NULL;
 	struct no_os_gpio_desc *ctl[4] = {0};
 	struct no_os_gpio_init_param en_agc_param = {
-		.number = E200_GPIO_EN_AGC,
+		.number = board->gpio_en_agc,
 		.platform_ops = &linux_gpio_ops,
 		.extra = NULL,
 	};
@@ -46,7 +47,7 @@ static int configure_gpio_outputs(void)
 
 	for (i = 0; i < 4; i++) {
 		struct no_os_gpio_init_param param = {
-			.number = E200_GPIO_CTL_BASE + i,
+			.number = board->gpio_ctl_base + i,
 			.platform_ops = &linux_gpio_ops,
 			.extra = NULL,
 		};
@@ -66,7 +67,7 @@ out:
 	return ret;
 }
 
-static int print_status_gpios(void)
+static int print_status_gpios(const struct fpv_board *board)
 {
 	struct no_os_gpio_desc *status[8] = {0};
 	uint8_t value = 0;
@@ -76,7 +77,7 @@ static int print_status_gpios(void)
 
 	for (i = 0; i < 8; i++) {
 		struct no_os_gpio_init_param param = {
-			.number = E200_GPIO_STATUS_BASE + i,
+			.number = board->gpio_status_base + i,
 			.platform_ops = &linux_gpio_ops,
 			.extra = NULL,
 		};
@@ -101,18 +102,19 @@ out:
 	return ret;
 }
 
-int e200_radio_init(struct ad9361_rf_phy **out, uint64_t rx_lo, uint64_t tx_lo, uint32_t sample_rate,
+int fpv_ad9361_init(struct ad9361_rf_phy **out, const struct fpv_board *board, uint64_t rx_lo, uint64_t tx_lo, uint32_t sample_rate,
 		       uint32_t bandwidth, uint32_t rx_gain,
 		       uint32_t tx_atten_mdb, bool enable_fir)
 {
 	struct ad9361_rf_phy *phy = NULL;
 	*out = NULL;
-	e200_ad9361_config_init();
+	fpv_ad9361_config_init(board);
 
 	e200_default_init_param.spi_param.device_id = E200_SPI_DEVICE_ID;
 	e200_default_init_param.spi_param.chip_select = E200_SPI_CS;
-	e200_default_init_param.gpio_resetb.number = E200_GPIO_RESETB;
-	e200_default_init_param.gpio_sync.number = E200_GPIO_SYNC;
+	e200_default_init_param.gpio_resetb.number = board->gpio_reset;
+	e200_default_init_param.gpio_sync.number = board->gpio_sync;
+	e200_default_init_param.rx_rf_port_input_select = fpv_board_rx_port(board, rx_lo);
 	e200_default_init_param.rx_synthesizer_frequency_hz = rx_lo;
 	e200_default_init_param.tx_synthesizer_frequency_hz = tx_lo;
 	e200_default_init_param.rf_rx_bandwidth_hz = bandwidth;
@@ -120,14 +122,14 @@ int e200_radio_init(struct ad9361_rf_phy **out, uint64_t rx_lo, uint64_t tx_lo, 
 	e200_default_init_param.rx_adc_init = &e200_rx_adc_init;
 	e200_default_init_param.tx_dac_init = &e200_tx_dac_init;
 
-	if (check_step("E200 GPIO setup", configure_gpio_outputs()))
+	if (check_step("Board GPIO setup", configure_gpio_outputs(board)))
 		return -1;
 	if (check_step("AD9361 init",
 		       ad9361_init(&phy, &e200_default_init_param)) || !phy)
 		return -1;
 
 	*out = phy;
-	if (check_step("E200 AXI DAC init",
+	if (check_step("AD9361 AXI DAC init",
 		       axi_dac_init(&phy->tx_dac, &e200_tx_dac_init)))
 		return -1;
 
@@ -164,19 +166,19 @@ int e200_radio_init(struct ad9361_rf_phy **out, uint64_t rx_lo, uint64_t tx_lo, 
 	if (check_step("AD9361 RX1 gain mode",
 		       ad9361_set_rx_gain_control_mode(phy, RX1, RF_GAIN_MGC)))
 		return -1;
-	if (check_step("AD9361 RX2 gain mode",
+	if (board->rx_channels > 1 && check_step("AD9361 RX2 gain mode",
 		       ad9361_set_rx_gain_control_mode(phy, RX2, RF_GAIN_MGC)))
 		return -1;
 	if (check_step("AD9361 RX1 gain",
 		       ad9361_set_rx_rf_gain(phy, RX1, (int32_t)rx_gain)))
 		return -1;
-	if (check_step("AD9361 RX2 gain",
+	if (board->rx_channels > 1 && check_step("AD9361 RX2 gain",
 		       ad9361_set_rx_rf_gain(phy, RX2, (int32_t)rx_gain)))
 		return -1;
 	if (check_step("AD9361 TX1 attenuation",
 		       ad9361_set_tx_attenuation(phy, TX1, tx_atten_mdb)))
 		return -1;
-	if (check_step("AD9361 TX2 attenuation",
+	if (board->rx_channels > 1 && check_step("AD9361 TX2 attenuation",
 		       ad9361_set_tx_attenuation(phy, TX2, tx_atten_mdb)))
 		return -1;
 	if (check_step("AD9361 RX LO", ad9361_set_rx_lo_freq(phy, rx_lo)))
@@ -184,10 +186,17 @@ int e200_radio_init(struct ad9361_rf_phy **out, uint64_t rx_lo, uint64_t tx_lo, 
 	if (check_step("AD9361 TX LO", ad9361_set_tx_lo_freq(phy, tx_lo)))
 		return -1;
 
-	if (check_step("E200 AXI DAC data select",
+	if (check_step("AD9361 AXI DAC data select",
 		       axi_dac_set_datasel(phy->tx_dac, -1,
 					   AXI_DAC_DATA_SEL_DMA)))
 		return -1;
 
-	return print_status_gpios();
+	return print_status_gpios(board);
+}
+
+/* Compatibility entry point for existing E200 applications. */
+int e200_radio_init(struct ad9361_rf_phy **out,uint64_t rx,uint64_t tx,
+ uint32_t rate,uint32_t bw,uint32_t gain,uint32_t att,bool fir)
+{
+ return fpv_ad9361_init(out,fpv_board_get(FPV_BOARD_E200),rx,tx,rate,bw,gain,att,fir);
 }

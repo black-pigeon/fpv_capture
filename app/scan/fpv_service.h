@@ -1,6 +1,7 @@
 #ifndef FPV_SERVICE_H
 #define FPV_SERVICE_H
 #include "fpv_backend.h"
+#include "fpv_feed.h"
 #include <pthread.h>
 struct fpv_track {
     unsigned id, revision, channel, standard, height, quality;
@@ -10,6 +11,7 @@ struct fpv_track {
     size_t size;
 };
 struct fpv_service {
+    struct fpv_feed feed;
     pthread_mutex_t mutex;
     pthread_cond_t condition;
     pthread_t worker;
@@ -18,7 +20,8 @@ struct fpv_service {
     struct fpv_scan_hop current;
     struct fpv_track tracks[FPV_SCAN_TRACKS];
     unsigned next_id, completed, total, rounds, capture_errors, rf_tunes, ddc_tunes;
-    unsigned captured_frames;
+    unsigned captured_frames, gain_target_db, gain_updates;
+    int gain_pending;
     int running, stopping, quitting, reconfigure, lock_ready, signal_present;
     char phase[32], error[192];
 };
@@ -27,6 +30,8 @@ void fpv_service_destroy(struct fpv_service *s);
 /* Starts idle acquisition or queues scan->lock, lock->scan and lock->lock.
  * The worker owns tuning; inspect status.switching before another command. */
 int fpv_service_start(struct fpv_service *s,const struct fpv_scan_config *c);
+/* Queue a worker-owned gain update, or set the default while idle. */
+int fpv_service_set_gain(struct fpv_service *s,unsigned gain);
 void fpv_service_stop(struct fpv_service *s);
 int fpv_service_clear(struct fpv_service *s);
 char *fpv_service_status(struct fpv_service *s);

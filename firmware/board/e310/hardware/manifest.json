@@ -1,0 +1,27 @@
+{
+  "format": "e310-fpv-xsa-v1",
+  "board": "e310",
+  "xsa": {
+    "file": "e310_fpv.xsa",
+    "sha256": "04cc2005ac42ceebefa0cf0c0be819215b4112370138d436bc05dcfe7663350b",
+    "bytes": 1516439
+  },
+  "bitstream": {
+    "member": "e310_fpv.bit",
+    "sha256": "863732c8c0f946c581a40e95e946b305fc0413b07c2efece340f8c19ea5b6b88",
+    "bytes": 4045668
+  },
+  "capture": {
+    "register_version": 6,
+    "packet_version": 2,
+    "channels": 4,
+    "dma_count": 1
+  },
+  "ethernet": {
+    "interface": "ps-gem-mio",
+    "phy_mode": "rgmii-id",
+    "phy_address": 0,
+    "converter_address": null,
+    "forced_phy_id": false
+  }
+}

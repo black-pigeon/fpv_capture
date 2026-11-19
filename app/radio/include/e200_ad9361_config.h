@@ -33,6 +33,8 @@ extern AD9361_InitParam e200_default_init_param;
 extern AD9361_RXFIRConfig e200_rx_fir_config;
 extern AD9361_TXFIRConfig e200_tx_fir_config;
 
+struct fpv_board;
+void fpv_ad9361_config_init(const struct fpv_board *board);
 void e200_ad9361_config_init(void);
 
 #endif

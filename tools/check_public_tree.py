@@ -2,17 +2,30 @@
 """Reject private implementation/artifacts in the Git index before a commit."""
 import argparse
 import hashlib
+import io
 import json
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
 import sys
+import zipfile
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'firmware/scripts'))
-from hardware_input import validate_xsa
+from hardware_input import SOURCE_PAYLOAD, validate_xsa
 
 PUBLIC_XSA = 'firmware/board/e200/hardware/e200_fpv.xsa'
 PUBLIC_MANIFEST = 'firmware/board/e200/hardware/manifest.json'
+PUBLIC_HARDWARE = {
+    'e200': (PUBLIC_XSA, PUBLIC_MANIFEST),
+    'e310': ('firmware/board/e310/hardware/e310_fpv.xsa',
+             'firmware/board/e310/hardware/manifest.json'),
+}
+PUBLIC_HARDWARE_FILES = {name for pair in PUBLIC_HARDWARE.values() for name in pair}
+# Only the reviewed, unmodified branding asset is allowed as a standalone image.
+PUBLIC_ASSET_HASHES = {
+    'app/web/microphase-logo.png':
+        '387b80817abed201a8acc7a874f1c0ef356c955b3540bd3e38d53bee06b726da',
+}
 PUBLIC_DRIVER_FILES = {
     'firmware/board/e200/linux/fpv_capture/' + name
     for name in ('Kconfig', 'Makefile', 'fpv_capture.c', 'COPYING')
@@ -35,7 +48,7 @@ ARTIFACT_SUFFIXES = (
 )
 ALLOWED_ROOTS = {'app', 'firmware', 'tests', 'tools', '.githooks'}
 KERNEL_SOURCE = re.compile(rb'\b(?:module_platform_driver|MODULE_LICENSE|module_init|module_exit)\s*\(')
-PRIVATE_RTL = re.compile(rb'\bmodule\s+(?:fpv_|e200_fpv\b)')
+PRIVATE_RTL = re.compile(rb'\bmodule\s+(?:fpv_|e(?:200|310)_fpv\b)')
 PRIVATE_KEY = re.compile(rb'^-----BEGIN (?:[A-Z0-9]+ )?PRIVATE KEY-----', re.M)
 
 
@@ -56,9 +69,10 @@ def path_reason(name):
     board_linux = 'firmware/board/e200/linux/'
     if name.startswith(board_linux) and name != board_linux + 'system-user.dtsi' and name not in PUBLIC_DRIVER_FILES:
         return 'private kernel implementation'
-    if name == PUBLIC_XSA or name == PUBLIC_MANIFEST:
+    if name in PUBLIC_HARDWARE_FILES:
         return None
-    if name.startswith('firmware/board/e200/hardware/'):
+    if any(name.startswith(str(PurePosixPath(pair[0]).parent) + '/')
+           for pair in PUBLIC_HARDWARE.values()):
         return 'unapproved hardware export'
     if name.lower().endswith(ARTIFACT_SUFFIXES):
         return 'hardware/source/archive/build or capture artifact'
@@ -70,13 +84,16 @@ def path_reason(name):
 def private_source_hashes(root):
     """Also catch byte-identical copies renamed outside their private directory."""
     hashes = set()
-    for directory in (root / 'fpga/e200_fpv/src',
+    for directory in (root / 'fpga/e200_fpv', root / 'fpga/e310_fpv',
                       root / 'firmware/board/e200/linux/axi_dma'):
         if not directory.is_dir():
             continue
         for source in directory.rglob('*'):
-            if source.is_file() and not source.is_symlink() and source.suffix in ('.v', '.sv', '.c', '.h'):
-                if source.name == 'system-user.dtsi':
+            if source.is_file() and not source.is_symlink() and source.suffix.lower() in (
+                    '.v', '.sv', '.vhd', '.vhdl', '.tcl', '.xdc', '.c', '.h'):
+                # Generated PS initialization is explicitly public XSA content.
+                if source.name in ('system-user.dtsi', 'ps7_init.c', 'ps7_init.h',
+                                   'ps7_init_gpl.c', 'ps7_init_gpl.h', 'ps7_init.tcl'):
                     continue
                 hashes.add(hashlib.sha256(source.read_bytes()).digest())
     return hashes
@@ -103,24 +120,38 @@ def check(root):
             errors.append(f'{name}: only resolved regular files may be committed')
             continue
         content = git(root, 'cat-file', 'blob', oid.decode())
-        if name in (PUBLIC_XSA, PUBLIC_MANIFEST):
+        if name in PUBLIC_HARDWARE_FILES:
             hardware[name] = content
+            continue
+        if name in PUBLIC_ASSET_HASHES:
+            if hashlib.sha256(content).hexdigest() != PUBLIC_ASSET_HASHES[name]:
+                errors.append(f'{name}: unreviewed branding asset')
             continue
         if content.startswith((b'\x7fELF', b'PK\x03\x04', b'\x1f\x8b')) or b'\0' in content:
             errors.append(f'{name}: binary/archive content')
         elif PRIVATE_KEY.search(content):
             errors.append(f'{name}: private key material')
-        elif (KERNEL_SOURCE.search(content) and name not in PUBLIC_DRIVER_FILES) or PRIVATE_RTL.search(content):
+        elif ((KERNEL_SOURCE.search(content) and name not in PUBLIC_DRIVER_FILES)
+              or PRIVATE_RTL.search(content) or SOURCE_PAYLOAD.search(content)):
             errors.append(f'{name}: kernel/FPGA implementation content')
         elif hashlib.sha256(content).digest() in hashes:
             errors.append(f'{name}: copy of local private source')
-    if hardware:
+    for board, (xsa_path, manifest_path) in PUBLIC_HARDWARE.items():
+        pair = {xsa_path, manifest_path}
+        if not pair.intersection(hardware):
+            continue
         try:
-            if set(hardware) != {PUBLIC_XSA, PUBLIC_MANIFEST}:
+            if not pair.issubset(hardware):
                 raise ValueError('XSA and public manifest must both be indexed')
-            validate_xsa(hardware[PUBLIC_XSA], json.loads(hardware[PUBLIC_MANIFEST]))
+            validate_xsa(hardware[xsa_path], json.loads(hardware[manifest_path]), board=board)
+            # Names alone cannot catch a private script renamed as PS init data.
+            # Validation above has already bounded and checked the archive.
+            with zipfile.ZipFile(io.BytesIO(hardware[xsa_path])) as archive:
+                for entry in archive.infolist():
+                    if hashlib.sha256(archive.read(entry)).digest() in hashes:
+                        raise ValueError('copy of local private source in XSA member: ' + entry.filename)
         except (ValueError, OSError) as error:
-            errors.append(f'{PUBLIC_XSA}: {error}')
+            errors.append(f'{xsa_path}: {error}')
     if errors:
         print('Commit blocked: excluded private content is present in the index.', file=sys.stderr)
         for error in errors:

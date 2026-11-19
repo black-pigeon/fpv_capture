@@ -22,11 +22,23 @@ endif
 
 NPROC ?= $(shell nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 8)
 UBOOT_JOBS ?= 1
+BUILDROOT_JOBS ?= $(NPROC)
 
 BUILD_ROOT ?= $(CURDIR)/build
 BUILD_DIR ?= $(BUILD_ROOT)/$(BOARD)
 SOURCE_STAMP_DIR ?= $(CURDIR)/.source-stamps
+LINUX_DIR ?= $(CURDIR)/linux
+UBOOT_DIR ?= $(CURDIR)/u-boot
 BUILDROOT_DIR ?= $(CURDIR)/buildroot
+ifeq ($(ISOLATE_BOARD_SOURCES),y)
+LINUX_DIR := $(BUILD_DIR)/sources/linux
+UBOOT_DIR := $(BUILD_DIR)/sources/u-boot
+BUILDROOT_DIR := $(BUILD_DIR)/sources/buildroot
+PRIVATE_SOURCE_STAMPS := $(addsuffix /.fpv-source.json,$(LINUX_DIR) $(UBOOT_DIR) $(BUILDROOT_DIR))
+endif
+# Buildroot clears overrides itself after its umask restart; keep explicitly
+# passed O/BR2_* values until then (SUBMAKE_ENV strips the parent make flags).
+BUILDROOT_EXTERNAL := $(CURDIR)/buildroot-external:$(CURDIR)/package
 BUILDROOT_OUTPUT_ROOT ?= $(BUILD_ROOT)/buildroot
 BUILDROOT_O ?= $(BUILDROOT_OUTPUT_ROOT)/$(BOARD)
 BUILDROOT_HOST_DIR := $(BUILDROOT_O)/host
@@ -60,6 +72,11 @@ CONSOLE_RENDER_SCRIPT := $(CURDIR)/scripts/render_ps_uart_config.py
 BUILDROOT_RELOCATION_CHECK_SCRIPT := $(CURDIR)/scripts/check_buildroot_output_relocation.sh
 SOURCE_BOARD_GUARD_SCRIPT := $(CURDIR)/scripts/check_shared_source_board.sh
 ACTIVE_BOARD_FILE := $(SOURCE_STAMP_DIR)/active-board
+ifeq ($(ISOLATE_BOARD_SOURCES),y)
+ACTIVE_BOARD_FILE := $(BUILD_DIR)/.source-stamps/active-board
+# E310 must never bypass its private-source guard via shared-source reuse.
+override REUSE_SHARED_SOURCES := 0
+endif
 SOURCE_PATCH_BOARD ?= $(shell if [ -f "$(ACTIVE_BOARD_FILE)" ]; then cat "$(ACTIVE_BOARD_FILE)"; else printf '%s' "$(BOARD)"; fi)
 REUSE_SHARED_SOURCES ?= 0
 
@@ -74,7 +91,7 @@ UBOOT_ELF := $(BUILD_DIR)/u-boot.elf
 
 ROOTFS_CPIO := $(BUILDROOT_O)/images/rootfs.cpio.gz
 ROOTFS_EXT4 := $(BUILDROOT_O)/images/rootfs.ext4
-KERNEL_IMAGE := $(CURDIR)/linux/$(LINUX_IMAGE_PATH)
+KERNEL_IMAGE := $(LINUX_DIR)/$(LINUX_IMAGE_PATH)
 DT_DIR := $(BUILD_DIR)/devicetree
 DT_SOURCE := $(DT_DIR)/system-top.dts
 DTB_FILE := $(BUILD_DIR)/system-top.dtb
@@ -112,13 +129,17 @@ RENDERED_BUILDROOT_DEFCONFIG_FILE := $(CONSOLE_DIR)/defconfig
 RENDERED_UBOOT_DTS_SOURCE := $(if $(and $(UBOOT_DTS_NAME),$(UBOOT_DTS_SOURCE)),$(CONSOLE_DIR)/$(UBOOT_DTS_NAME).dts)
 ACTIVE_UBOOT_DTS_SOURCE := $(if $(RENDERED_UBOOT_DTS_SOURCE),$(RENDERED_UBOOT_DTS_SOURCE),$(UBOOT_DTS_SOURCE))
 LINUX_PATCH_FILES := $(sort $(wildcard $(BOARD_DIR)/patches/linux/*.patch))
-BUILDROOT_PATCH_FILES := $(sort $(wildcard $(BOARD_DIR)/patches/buildroot/*.patch))
+BUILDROOT_PATCH_FILES := $(sort $(wildcard $(BOARD_DIR)/patches/buildroot/*.patch $(SHARED_BUILDROOT_PATCH_DIR)/*.patch))
 ROOTFS_OVERLAY_FILES := $(shell if [ -d "$(BOARD_ROOTFS_OVERLAY_DIR)" ]; then find "$(BOARD_ROOTFS_OVERLAY_DIR)" \( -type f -o -type l \) -print | sort; fi)
 ROOTFS_PACKAGE_FILES := $(shell find "$(CURDIR)/buildroot-external/package" -type f -o -type l | sort; if [ -d "$(BOARD_DIR)" ]; then find "$(BOARD_DIR)" \( -path '*/.git' -o -path '*/.cache' -o -path '*/build' -o -path '*/build-*' -o -path '*/patches/autosave' \) -prune -o \( -type f -o -type l \) -print | sort; fi)
 # Re-extract the local package when application sources change.
+BUILDROOT_BOARD_FILES := $(wildcard $(CURDIR)/package/*)
+ROOTFS_PACKAGE_FILES += $(BUILDROOT_BOARD_FILES)
 ROOTFS_PACKAGE_FILES += $(shell find "$(CURDIR)/../app" -type f -print | sort)
 BUILDROOT_LOCAL_PACKAGE_STAMPS := $(foreach pkg,$(BUILDROOT_LOCAL_PACKAGES),$(BUILDROOT_O)/.local-package-$(pkg).stamp)
 BOARD_LINUX_FILES := $(shell if [ -d "$(BOARD_LINUX_DIR)" ]; then find "$(BOARD_LINUX_DIR)" \( -type f -o -type l \) ! -name '*.o' ! -name '*.cmd' ! -name '.*.cmd' ! -name 'built-in.a' ! -name 'modules.*' | sort; fi)
+# E310 installs the same canonical driver and UAPI as E200.
+BOARD_LINUX_FILES += $(wildcard $(CAPTURE_DRIVER_DIR)/*) $(CAPTURE_INSTALL_SCRIPT)
 U_BOOT_STAMP := $(STAMP_DIR)/u-boot-uart$(CONSOLE_UART)
 U_BOOT_CONFIG_STAMP := $(STAMP_DIR)/u-boot-config-uart$(CONSOLE_UART)
 BSP_STAMP := $(STAMP_DIR)/sdk-uart$(CONSOLE_UART)
@@ -140,12 +161,12 @@ FORCE:
 all: sd
 
 help:
-	@echo 'E200 FPV firmware foundation'
+	@echo 'FPV firmware foundation ($(BOARD))'
 	@echo '  fetch / fetch-locked  - fetch fixed refs / exact locked commits'
 	@echo '  show-config          - print board, hardware and output paths'
 	@echo '  toolchain / rootfs   - build ARM toolchain / root filesystem'
 	@echo '  kernel / u-boot      - build Linux / U-Boot'
-	@echo '  fsbl / dt / bootbin  - build from matching E200 FPV XSA'
+	@echo '  fsbl / dt / bootbin  - build from matching $(BOARD) FPV XSA'
 	@echo '  sd                   - assemble SD boot files (default)'
 	@echo '  clean                - remove build output only'
 	@echo '  hardware             - validate XSA and extract its bitstream'
@@ -170,16 +191,20 @@ show-config:
 	@echo "PMUFW_STDIO=$(PMUFW_STDIO)"
 	@echo "BUILD_DIR=$(BUILD_DIR)"
 	@echo "BUILDROOT_O=$(BUILDROOT_O)"
+	@echo "LINUX_DIR=$(LINUX_DIR)"
+	@echo "UBOOT_DIR=$(UBOOT_DIR)"
+	@echo "BUILDROOT_DIR=$(BUILDROOT_DIR)"
+	@echo "BUILDROOT_JOBS=$(BUILDROOT_JOBS)"
 	@echo "BUILDROOT_DEFCONFIG_FILE=$(BUILDROOT_DEFCONFIG_FILE)"
 	@echo "LINUX_DEFCONFIG=$(LINUX_DEFCONFIG)"
 	@echo "UBOOT_DEFCONFIG=$(UBOOT_DEFCONFIG)"
 	@echo "BOOTGEN_ARCH=$(BOOTGEN_ARCH)"
 
-check-source-board: | $(SOURCE_STAMP_DIR)
+check-source-board: $(PRIVATE_SOURCE_STAMPS) | $(SOURCE_STAMP_DIR)
 	bash "$(SOURCE_BOARD_GUARD_SCRIPT)" "$(ACTIVE_BOARD_FILE)" "$(BOARD)" "$(REUSE_SHARED_SOURCES)" \
-		"$(CURDIR)/linux" \
-		"$(CURDIR)/u-boot" \
-		"$(CURDIR)/buildroot"
+		"$(LINUX_DIR)" \
+		"$(UBOOT_DIR)" \
+		"$(BUILDROOT_DIR)"
 
 fetch:
 	python3 scripts/fetch_sources.py --manifest versions.mk --root .
@@ -204,7 +229,7 @@ repos: \
 	$(DEVICE_TREE_FETCH_STAMP)
 
 $(BUILDROOT_FETCH_STAMP): | validate-source-lock $(SOURCE_STAMP_DIR)
-	$(FETCH_SCRIPT) "$(BUILDROOT_REPO_URL)" "$(BUILDROOT_REPO_REF)" "$(BUILDROOT_DIR)"
+	$(FETCH_SCRIPT) "$(BUILDROOT_REPO_URL)" "$(BUILDROOT_REPO_REF)" "$(CURDIR)/buildroot"
 	touch $@
 
 $(LINUX_FETCH_STAMP): | validate-source-lock $(SOURCE_STAMP_DIR)
@@ -223,9 +248,23 @@ $(DEVICE_TREE_FETCH_STAMP): | validate-source-lock $(SOURCE_STAMP_DIR)
 	$(FETCH_SCRIPT) "$(DEVICE_TREE_REPO_URL)" "$(DEVICE_TREE_REPO_REF)" "$(CURDIR)/device-tree-xlnx"
 	touch $@
 
+ifeq ($(ISOLATE_BOARD_SOURCES),y)
+$(LINUX_DIR)/.fpv-source.json: $(LINUX_FETCH_STAMP) $(SOURCE_IDENTITY_INPUTS) scripts/prepare_board_source.py | validate-source-lock
+	python3 scripts/prepare_board_source.py --root "$(CURDIR)" --component linux --output "$(LINUX_DIR)"
+	touch $@
+
+$(UBOOT_DIR)/.fpv-source.json: $(UBOOT_FETCH_STAMP) $(SOURCE_IDENTITY_INPUTS) scripts/prepare_board_source.py | validate-source-lock
+	python3 scripts/prepare_board_source.py --root "$(CURDIR)" --component u-boot --output "$(UBOOT_DIR)"
+	touch $@
+
+$(BUILDROOT_DIR)/.fpv-source.json: $(BUILDROOT_FETCH_STAMP) $(SOURCE_IDENTITY_INPUTS) scripts/prepare_board_source.py | validate-source-lock
+	python3 scripts/prepare_board_source.py --root "$(CURDIR)" --component buildroot --output "$(BUILDROOT_DIR)"
+	touch $@
+endif
+
 $(DTC_COMPAT_STAMP): $(UBOOT_FETCH_STAMP) $(LINUX_FETCH_STAMP) $(DTC_PATCH_SCRIPT) | check-source-board $(STAMP_DIR)
-	bash "$(DTC_PATCH_SCRIPT)" "$(CURDIR)/u-boot/scripts/dtc/dtc-lexer.l"
-	bash "$(DTC_PATCH_SCRIPT)" "$(CURDIR)/linux/scripts/dtc/dtc-lexer.l"
+	bash "$(DTC_PATCH_SCRIPT)" "$(UBOOT_DIR)/scripts/dtc/dtc-lexer.l"
+	bash "$(DTC_PATCH_SCRIPT)" "$(LINUX_DIR)/scripts/dtc/dtc-lexer.l"
 	touch $@
 
 $(CONSOLE_STAMP): | $(STAMP_DIR)
@@ -243,19 +282,19 @@ $(CONSOLE_DIR):
 	mkdir -p $@
 
 $(RENDERED_SYSTEM_USER_DTSI): $(SYSTEM_USER_DTSI) $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
-	python3 "$(CONSOLE_RENDER_SCRIPT)" linux-dtsi --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)"
+	python3 "$(CONSOLE_RENDER_SCRIPT)" linux-dtsi --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS)
 
 $(RENDERED_UENV_FILE): $(UENV_FILE) $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
-	python3 "$(CONSOLE_RENDER_SCRIPT)" uenv --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)"
+	python3 "$(CONSOLE_RENDER_SCRIPT)" uenv --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS)
 
 $(RENDERED_EMMC_UENV_FILE): $(EMMC_UENV_FILE) $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
-	python3 "$(CONSOLE_RENDER_SCRIPT)" uenv --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)"
+	python3 "$(CONSOLE_RENDER_SCRIPT)" uenv --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS)
 
 $(RENDERED_UBOOT_CONFIG_FRAGMENT): $(UBOOT_CONFIG_FRAGMENT) $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
-	python3 "$(CONSOLE_RENDER_SCRIPT)" uboot-fragment --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)"
+	python3 "$(CONSOLE_RENDER_SCRIPT)" uboot-fragment --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS)
 
 $(RENDERED_BUILDROOT_POST_BUILD_SCRIPT): $(BOARD_BUILDROOT_DIR)/post-build.sh $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
-	python3 "$(CONSOLE_RENDER_SCRIPT)" post-build --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)"
+	python3 "$(CONSOLE_RENDER_SCRIPT)" post-build --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS)
 	chmod +x "$@"
 
 $(RENDERED_BUILDROOT_DEFCONFIG_FILE): $(BUILDROOT_DEFCONFIG_FILE) $(RENDERED_BUILDROOT_POST_BUILD_SCRIPT) $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
@@ -264,20 +303,20 @@ $(RENDERED_BUILDROOT_DEFCONFIG_FILE): $(BUILDROOT_DEFCONFIG_FILE) $(RENDERED_BUI
 		--output "$@" \
 		--console-uart "$(CONSOLE_UART)" \
 		--console-tty "$(CONSOLE_TTY)" \
-		--console-uart-base "$(CONSOLE_UART_BASE)" \
+		--console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS) \
 		--post-build-script "$(abspath $(RENDERED_BUILDROOT_POST_BUILD_SCRIPT))"
 
 ifneq ($(strip $(RENDERED_UBOOT_DTS_SOURCE)),)
 $(RENDERED_UBOOT_DTS_SOURCE): $(UBOOT_DTS_SOURCE) $(CONSOLE_RENDER_SCRIPT) | $(CONSOLE_DIR)
-	python3 "$(CONSOLE_RENDER_SCRIPT)" uboot-dts --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)"
+	python3 "$(CONSOLE_RENDER_SCRIPT)" uboot-dts --source "$<" --output "$@" --console-uart "$(CONSOLE_UART)" --console-tty "$(CONSOLE_TTY)" --console-uart-base "$(CONSOLE_UART_BASE)" $(CONSOLE_RENDER_FLAGS)
 endif
 
 $(UBOOT_DTS_STAMP): $(UBOOT_FETCH_STAMP) $(ACTIVE_UBOOT_DTS_SOURCE) $(UBOOT_DTS_SYNC_SCRIPT) | check-source-board $(STAMP_DIR)
 	if [ -n "$(UBOOT_DTS_NAME)" ] && [ -n "$(UBOOT_DTS_SOURCE)" ]; then \
 		bash "$(UBOOT_DTS_SYNC_SCRIPT)" \
 			"$(ACTIVE_UBOOT_DTS_SOURCE)" \
-			"$(CURDIR)/u-boot/arch/arm/dts/$(UBOOT_DTS_NAME).dts" \
-			"$(CURDIR)/u-boot/arch/arm/dts/Makefile" \
+			"$(UBOOT_DIR)/arch/arm/dts/$(UBOOT_DTS_NAME).dts" \
+			"$(UBOOT_DIR)/arch/arm/dts/Makefile" \
 			"$(UBOOT_DTS_NAME)"; \
 	fi
 	touch $@
@@ -287,15 +326,15 @@ toolchain: $(BUILDROOT_TOOLCHAIN_FIX_STAMP)
 $(BUILDROOT_OUTPUT_PATH_STAMP): $(BUILDROOT_RELOCATION_CHECK_SCRIPT)
 	bash "$(BUILDROOT_RELOCATION_CHECK_SCRIPT)" "$(BUILDROOT_O)" "$@"
 
-$(BUILDROOT_DEFCONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(BUILDROOT_FETCH_STAMP) $(RENDERED_BUILDROOT_DEFCONFIG_FILE) $(BOARD_DIR)/apply-buildroot-patches.sh $(BUILDROOT_PATCH_FILES) | check-source-board $(BUILDROOT_OUTPUT_PATH_STAMP)
+$(BUILDROOT_DEFCONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(BUILDROOT_FETCH_STAMP) $(RENDERED_BUILDROOT_DEFCONFIG_FILE) $(BUILDROOT_BOARD_FILES) $(BOARD_DIR)/apply-buildroot-patches.sh $(BUILDROOT_PATCH_FILES) | check-source-board $(BUILDROOT_OUTPUT_PATH_STAMP)
 	if [ -f "$(BOARD_DIR)/apply-buildroot-patches.sh" ]; then \
 		bash "$(BOARD_DIR)/apply-buildroot-patches.sh" "$(BUILDROOT_DIR)"; \
 	fi
-	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_EXTERNAL=$(CURDIR)/buildroot-external BR2_DEFCONFIG=$(RENDERED_BUILDROOT_DEFCONFIG_FILE) defconfig
+	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_JLEVEL=$(BUILDROOT_JOBS) BR2_EXTERNAL=$(BUILDROOT_EXTERNAL) BR2_DEFCONFIG=$(RENDERED_BUILDROOT_DEFCONFIG_FILE) defconfig
 	touch $@
 
 $(BUILDROOT_TOOLCHAIN_STAMP): $(BUILDROOT_DEFCONFIG_STAMP) | $(BUILDROOT_OUTPUT_PATH_STAMP)
-	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) toolchain
+	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_JLEVEL=$(BUILDROOT_JOBS) toolchain
 	touch $@
 
 $(BUILDROOT_TOOLCHAIN_FIX_STAMP): $(BUILDROOT_TOOLCHAIN_STAMP) scripts/fix_vitis_toolchain_wrappers.sh | $(BUILDROOT_OUTPUT_PATH_STAMP)
@@ -304,7 +343,7 @@ $(BUILDROOT_TOOLCHAIN_FIX_STAMP): $(BUILDROOT_TOOLCHAIN_STAMP) scripts/fix_vitis
 
 $(BUILDROOT_DROPBEAR_REFRESH_STAMP): $(BUILDROOT_DEFCONFIG_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) | $(BUILDROOT_OUTPUT_PATH_STAMP)
 	@if grep -q '^BR2_PACKAGE_DROPBEAR=y' "$(BUILDROOT_O)/.config"; then \
-		flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) dropbear-dirclean; \
+		flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_JLEVEL=$(BUILDROOT_JOBS) dropbear-dirclean; \
 	fi
 	touch $@
 
@@ -312,56 +351,59 @@ $(BUILDROOT_O)/.local-package-%.stamp: $(BUILDROOT_DEFCONFIG_STAMP) $(BUILDROOT_
 	# Buildroot's *-rebuild target reuses the already-rsynced local source tree.
 	# Remove it first so changes under board/ and buildroot-external/package/ are
 	# copied into the package build directory before rebuilding the rootfs.
-	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) $*-dirclean
-	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) $*
+	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_JLEVEL=$(BUILDROOT_JOBS) $*-dirclean
+	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_JLEVEL=$(BUILDROOT_JOBS) $*
 	touch $@
 
 $(ROOTFS_CPIO): $(BUILDROOT_DEFCONFIG_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(BUILDROOT_DROPBEAR_REFRESH_STAMP) $(BUILDROOT_LOCAL_PACKAGE_STAMPS) $(EMBEDDEDSW_FETCH_STAMP) $(RENDERED_BUILDROOT_POST_BUILD_SCRIPT) $(ROOTFS_OVERLAY_FILES) $(ROOTFS_PACKAGE_FILES) | $(BUILDROOT_OUTPUT_PATH_STAMP)
-	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C $(BUILDROOT_DIR) O=$(BUILDROOT_O)
+	flock "$(BUILDROOT_LOCK)" $(SAFE_ENV) $(SUBMAKE_ENV) $(MAKE) -C $(BUILDROOT_DIR) O=$(BUILDROOT_O) BR2_JLEVEL=$(BUILDROOT_JOBS)
 
 $(ROOTFS_EXT4): $(ROOTFS_CPIO)
 	test -s "$@"
 
 $(HARDWARE_FILE): $(HW_FILE) $(HW_MANIFEST) scripts/hardware_input.py | $(BUILD_DIR)
-	python3 scripts/hardware_input.py --xsa "$(HW_FILE)" --manifest "$(HW_MANIFEST)"
+	python3 scripts/hardware_input.py --board "$(BOARD)" --xsa "$(HW_FILE)" --manifest "$(HW_MANIFEST)"
 	cp "$(HW_FILE)" "$@"
 
 $(BITSTREAM_FILE): $(HARDWARE_FILE) $(HW_MANIFEST) scripts/hardware_input.py | $(BUILD_DIR)
-	python3 scripts/hardware_input.py --xsa "$(HARDWARE_FILE)" --manifest "$(HW_MANIFEST)" --output-bit "$@"
+	python3 scripts/hardware_input.py --board "$(BOARD)" --xsa "$(HARDWARE_FILE)" --manifest "$(HW_MANIFEST)" --output-bit "$@"
 
 hardware: $(HARDWARE_FILE) $(BITSTREAM_FILE)
 
 $(LINUX_CONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(LINUX_FETCH_STAMP) $(DTC_COMPAT_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(BOARD_DIR)/apply-linux-patches.sh $(CURDIR)/../app/include/linux/fpv_capture.h $(LINUX_PATCH_FILES) $(BOARD_LINUX_FILES) | check-source-board $(STAMP_DIR)
 	# Apply Linux kernel patches if available
 	if [ -f "$(BOARD_DIR)/apply-linux-patches.sh" ]; then \
-		bash "$(BOARD_DIR)/apply-linux-patches.sh" "$(CURDIR)/linux"; \
+		bash "$(BOARD_DIR)/apply-linux-patches.sh" "$(LINUX_DIR)"; \
 	fi
-	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C linux ARCH=$(LINUX_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) $(LINUX_DEFCONFIG)
+	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C "$(LINUX_DIR)" ARCH=$(LINUX_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) $(LINUX_DEFCONFIG)
 	if [ -n "$(strip $(LINUX_CONFIG_ENABLES))" ]; then \
 		for cfg in $(LINUX_CONFIG_ENABLES); do \
-			"$(CURDIR)/linux/scripts/config" --file "$(CURDIR)/linux/.config" --enable "$$cfg"; \
+			"$(LINUX_DIR)/scripts/config" --file "$(LINUX_DIR)/.config" --enable "$$cfg"; \
 		done; \
-		$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C linux ARCH=$(LINUX_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) olddefconfig; \
+		for cfg in $(LINUX_CONFIG_DISABLES); do \
+			"$(LINUX_DIR)/scripts/config" --file "$(LINUX_DIR)/.config" --disable "$$cfg"; \
+		done; \
+		$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C "$(LINUX_DIR)" ARCH=$(LINUX_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) olddefconfig; \
 	fi
 
 	touch $@
 
 $(KERNEL_IMAGE): $(LINUX_CONFIG_STAMP)
-	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C linux -j $(NPROC) ARCH=$(LINUX_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) $(LINUX_IMAGE_TARGET)
+	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C "$(LINUX_DIR)" -j $(NPROC) ARCH=$(LINUX_ARCH) CROSS_COMPILE=$(CROSS_COMPILE) $(LINUX_IMAGE_TARGET)
 	touch $@
 
 $(U_BOOT_CONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(UBOOT_FETCH_STAMP) $(DTC_COMPAT_STAMP) $(UBOOT_DTS_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(RENDERED_UBOOT_CONFIG_FRAGMENT) | $(STAMP_DIR)
-	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C u-boot ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) $(UBOOT_BUILD_FLAGS) $(UBOOT_DEFCONFIG)
-	cd u-boot && ./scripts/kconfig/merge_config.sh -m .config $(RENDERED_UBOOT_CONFIG_FRAGMENT)
-	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C u-boot ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) $(UBOOT_BUILD_FLAGS) olddefconfig
+	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C "$(UBOOT_DIR)" ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) $(UBOOT_BUILD_FLAGS) $(UBOOT_DEFCONFIG)
+	cd "$(UBOOT_DIR)" && ./scripts/kconfig/merge_config.sh -m .config $(RENDERED_UBOOT_CONFIG_FRAGMENT)
+	$(HOST_PATH) $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C "$(UBOOT_DIR)" ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) $(UBOOT_BUILD_FLAGS) olddefconfig
 	touch $@
 
 $(U_BOOT_STAMP): $(U_BOOT_CONFIG_STAMP) | $(STAMP_DIR)
-	flock "$(UBOOT_LOCK)" env PATH="$(BUILDROOT_HOST_DIR)/bin:$(PATH)" $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C u-boot -j $(UBOOT_JOBS) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) $(UBOOT_BUILD_FLAGS) u-boot.elf tools
+	flock "$(UBOOT_LOCK)" env PATH="$(BUILDROOT_HOST_DIR)/bin:$(PATH)" $(SUBMAKE_ENV) $(MAKE) MAKEOVERRIDES= -C "$(UBOOT_DIR)" -j $(UBOOT_JOBS) ARCH=arm CROSS_COMPILE=$(CROSS_COMPILE) $(UBOOT_BUILD_FLAGS) u-boot.elf tools
 	touch $@
 
 $(UBOOT_ELF): $(U_BOOT_STAMP) | $(BUILD_DIR)
-	cp u-boot/u-boot.elf $@
+	cp "$(UBOOT_DIR)/u-boot.elf" $@
 
 
 $(BL31_ELF):
@@ -402,10 +444,10 @@ $(DT_SOURCE): $(SOURCE_IDENTITY_INPUTS) $(HARDWARE_FILE) $(DEVICE_TREE_FETCH_STA
 $(DTB_FILE): $(DT_SOURCE) | $(BUILD_DIR)
 	cpp -nostdinc -undef -D__DTS__ -x assembler-with-cpp -P \
 		-I $(DT_DIR) \
-		-I $(CURDIR)/linux \
-		-I $(CURDIR)/linux/include \
-		-I $(CURDIR)/linux/arch/$(LINUX_ARCH)/boot/dts \
-		-I $(CURDIR)/linux/arch/$(LINUX_ARCH)/boot/dts/xilinx \
+		-I $(LINUX_DIR) \
+		-I $(LINUX_DIR)/include \
+		-I $(LINUX_DIR)/arch/$(LINUX_ARCH)/boot/dts \
+		-I $(LINUX_DIR)/arch/$(LINUX_ARCH)/boot/dts/xilinx \
 		$(DT_SOURCE) > $(BUILD_DIR)/system-top.pp.dts
 	dtc -@ -I dts -O dtb -o $@ $(BUILD_DIR)/system-top.pp.dts
 
@@ -413,7 +455,7 @@ $(FIT_ITS): scripts/gen_image_its.sh $(KERNEL_IMAGE) $(DTB_FILE) $(ROOTFS_CPIO) 
 	scripts/gen_image_its.sh "$@" "$(KERNEL_IMAGE)" "$(DTB_FILE)" "$(ROOTFS_CPIO)" "$(FIT_DESCRIPTION)" "$(FIT_KERNEL_LOAD_ADDR)" "$(FIT_KERNEL_ENTRY_ADDR)" "$(RAMDISK_IMAGE_ARCH)"
 
 $(IMAGE_UB): $(FIT_ITS) $(U_BOOT_STAMP) $(KERNEL_IMAGE) $(DTB_FILE) $(ROOTFS_CPIO) | $(BUILD_DIR)
-	$(HOST_PATH) u-boot/tools/mkimage -f $(FIT_ITS) $@ || \
+	$(HOST_PATH) "$(UBOOT_DIR)/tools/mkimage" -f $(FIT_ITS) $@ || \
 	{ \
 		test -s "$@" && \
 		fdtget "$@" / description >/dev/null 2>&1 && \
@@ -423,7 +465,7 @@ $(IMAGE_UB): $(FIT_ITS) $(U_BOOT_STAMP) $(KERNEL_IMAGE) $(DTB_FILE) $(ROOTFS_CPI
 
 ifeq ($(RAMDISK_WRAP_MKIMAGE),y)
 $(URAMDISK_FILE): $(ROOTFS_CPIO) $(U_BOOT_STAMP) | $(BUILD_DIR)
-	$(HOST_PATH) u-boot/tools/mkimage -A $(RAMDISK_IMAGE_ARCH) -O linux -T ramdisk -C gzip -n "$(BOARD_DESC) initramfs" -d "$(ROOTFS_CPIO)" "$@"
+	$(HOST_PATH) "$(UBOOT_DIR)/tools/mkimage" -A $(RAMDISK_IMAGE_ARCH) -O linux -T ramdisk -C gzip -n "$(BOARD_DESC) initramfs" -d "$(ROOTFS_CPIO)" "$@"
 else
 $(URAMDISK_FILE): $(ROOTFS_CPIO) | $(BUILD_DIR)
 	cp "$(ROOTFS_CPIO)" "$@"

@@ -1,0 +1,46 @@
+# Original ANTSDR E310 (v0.39 TARGET=ant), not e310v2 or Ettus E31x.
+BOARD_NAME := e310
+BOARD_DESC := ANTSDR E310 Zynq-7000 firmware builder
+SOC_FAMILY := zynq
+BOOTGEN_ARCH := zynq
+ISOLATE_BOARD_SOURCES := y
+
+HW_ARTIFACT_DIR := $(CURDIR)/board/e310/hardware
+HW_FILE := $(HW_ARTIFACT_DIR)/e310_fpv.xsa
+HW_MANIFEST := $(HW_ARTIFACT_DIR)/manifest.json
+HW_BIT = $(BUILD_DIR)/e310_fpv.bit
+
+FSBL_PROC := ps7_cortexa9_0
+DT_PROC := ps7_cortexa9_0
+FSBL_STDIO := ps7_uart_1
+CONSOLE_UART := 1
+CONSOLE_TTY := ttyPS1
+CONSOLE_UART_BASE := 0xe0001000
+CONSOLE_EARLYCON := cdns,mmio,$(CONSOLE_UART_BASE)
+CONSOLE_RENDER_FLAGS := --preserve-uart-numbering
+
+LINUX_ARCH := arm
+LINUX_DEFCONFIG := xilinx_zynq_defconfig
+LINUX_IMAGE_TARGET := zImage
+LINUX_IMAGE_PATH := arch/arm/boot/zImage
+LINUX_CONFIG_ENABLES := DMADEVICES XILINX_DMA FPV_CAPTURE MACB MARVELL_PHY SPI_SPIDEV GPIO_CDEV
+# AD9361 is owned by userspace no-OS; GEM0 connects directly over PS MIO.
+LINUX_CONFIG_DISABLES := IIO XILINX_GMII2RGMII
+CAPTURE_DRIVER_DIR := $(CURDIR)/board/e200/linux/fpv_capture
+CAPTURE_INSTALL_SCRIPT := $(CURDIR)/scripts/install_capture_driver.py
+
+UBOOT_DEFCONFIG := xilinx_zynq_virt_defconfig
+UBOOT_DTS_NAME := zynq-e310
+BUILDROOT_CROSS := arm-linux-gnueabihf-
+VITIS_AARCH64_LINUX_DIR := /opt/Xilinx/Vitis/2022.2/gnu/aarch32/lin/gcc-arm-linux-gnueabi
+SHARED_BUILDROOT_PATCH_DIR := $(CURDIR)/board/e200/patches/buildroot
+BUILDROOT_LOCAL_PACKAGES += e200-radio-probe
+
+SD_BOOT_IMAGE_NAME := BOOT.BIN
+SD_KERNEL_IMAGE_NAME := zImage
+SD_RAMDISK_NAME := rootfs.cpio.gz
+RAMDISK_IMAGE_ARCH := arm
+RAMDISK_WRAP_MKIMAGE := n
+BOOT_BIN_INCLUDE_BITSTREAM := n
+SD_BITSTREAM_NAME := e310_fpv.bit
+FIRMWARE_FORMAT := e310-firmware-v1

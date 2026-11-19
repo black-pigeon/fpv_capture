@@ -1,0 +1,22 @@
+#!/bin/sh
+# Web server starts independently of RF initialization; no-OS starts from UI.
+DAEMON=/usr/sbin/fpv-webd
+PIDFILE=/var/run/fpv-webd.pid
+LOG=/var/log/fpv-webd.log
+case "$1" in
+    start)
+        printf 'Starting E310 FPV web: '
+        start-stop-daemon -S -q -b -m -p "$PIDFILE" -x "$DAEMON" -- >> "$LOG" 2>&1
+        ret=$?; [ "$ret" -eq 0 ] && echo OK || echo FAIL
+        exit "$ret"
+        ;;
+    stop)
+        printf 'Stopping E310 FPV web: '
+        start-stop-daemon -K -q -p "$PIDFILE" -x "$DAEMON"
+        ret=$?; [ "$ret" -eq 0 ] && echo OK || echo FAIL
+        [ "$ret" -eq 0 ] && rm -f "$PIDFILE"
+        exit "$ret"
+        ;;
+    restart) "$0" stop; "$0" start ;;
+    *) echo "Usage: $0 {start|stop|restart}"; exit 1 ;;
+esac

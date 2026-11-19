@@ -1,4 +1,5 @@
 #include "fpv_scan.h"
+#include "fpv_board.h"
 #include <errno.h>
 #include <math.h>
 #include <stdio.h>
@@ -107,14 +108,29 @@ int fpv_scan_plan(const struct fpv_scan_config *c,unsigned point,struct fpv_scan
      * The last phase may use fewer than four channels; rounding the window
      * down to four centers would discard useful LO reuse at coarse grids. */
     unsigned capacity=FPV_SCAN_CENTER_SPAN_HZ/c->step_hz+1;
-    unsigned first=(point/capacity)*capacity;
-    unsigned n=band_points(c,b)-first;if(n>capacity)n=capacity;
+    unsigned segment_first=0,segment_count=band_points(c,b),window_offset=0;
+    uint64_t boundary=fpv_board_current()->rx_boundary_hz;
+    if(boundary && c->bands[b].start_hz<boundary && c->bands[b].end_hz>=boundary) {
+        unsigned cut=(unsigned)((boundary-c->bands[b].start_hz+c->step_hz-1)/c->step_hz);
+        if(point<cut)segment_count=cut;
+        else {
+            segment_first=cut;segment_count-=cut;
+            window_offset=(cut+capacity-1)/capacity;
+        }
+    }
+    unsigned in_segment=point-segment_first;
+    unsigned window_first=(in_segment/capacity)*capacity;
+    unsigned first=segment_first+window_first;
+    unsigned n=segment_count-window_first;if(n>capacity)n=capacity;
     unsigned local=point-first;
     if(local%4)return -1; /* point is the number of completed scheduled slots */
     unsigned phase=local/4,base=n/4,extra=n%4;
-    h->window=first/capacity;h->phase=phase;h->phases=(n+3)/4;
+    h->window=window_offset+window_first/capacity;h->phase=phase;h->phases=(n+3)/4;
     uint64_t start=c->bands[b].start_hz+(uint64_t)first*c->step_hz;
     uint64_t end=c->bands[b].start_hz+(uint64_t)(first+n-1)*c->step_hz;
+    /* The extra endpoint may be this window's only center. Clamp both
+     * bounds just like target_hz, not the extrapolated grid position. */
+    if(start>c->bands[b].end_hz)start=c->bands[b].end_hz;
     if(end>c->bands[b].end_hz)end=c->bands[b].end_hz;
     h->lo_hz=(start+end)/2;
     for(unsigned ch=0;ch<4;ch++) {

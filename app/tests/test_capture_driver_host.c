@@ -37,6 +37,7 @@ struct dma_async_tx_descriptor { void (*callback)(void *); void *callback_param;
 #define time_before(a, b) ((long)((a) - (b)) < 0)
 #define msecs_to_jiffies(ms) (ms)
 #define dma_rmb() ((void)0)
+#define pr_warn_ratelimited(...) ((void)0)
 static unsigned long jiffies;
 static int signal_pending(void *task);
 static u32 readl(void *address);
@@ -79,6 +80,18 @@ static unsigned long acknowledge_at;
 static bool radio_clock, interrupted, dma_issued, stalled_dma;
 static bool stale_source, lost_source, prepare_failure;
 static int terminate_error;
+static unsigned drop_begins, drop_commits, begin_writes, commit_writes;
+static unsigned tune_delay, pending_command;
+static unsigned long tune_due;
+static bool wrong_tune_epoch, late_tune, tune_ack_pending;
+static unsigned tune_polls;
+static unsigned long tune_ack_due;
+static void accept_tune(unsigned command)
+{
+    registers[REG_TUNE / 4] = command == CMD_BEGIN_TUNE;
+    if (command == CMD_BEGIN_TUNE || wrong_tune_epoch)
+        registers[REG_EPOCH / 4] += wrong_tune_epoch ? 2 : 1;
+}
 static size_t dma_len;
 static u32 states[4];
 static unsigned reg_offset(void *address)
@@ -87,6 +100,21 @@ static u32 readl(void *address)
 {
     unsigned offset = reg_offset(address);
     assert(offset < sizeof(registers) && !(offset & 3));
+    if (pending_command &&
+        ((!late_tune && jiffies >= tune_due) ||
+         (late_tune && offset == REG_TUNE && ++tune_polls > 100))) {
+        accept_tune(pending_command);
+        pending_command = 0;
+        if (late_tune) {
+            registers[REG_STATUS / 4] = 1;
+            tune_ack_pending = true;
+            tune_ack_due = jiffies + 3;
+        }
+    }
+    if (offset == REG_STATUS && tune_ack_pending && jiffies >= tune_ack_due) {
+        registers[REG_STATUS / 4] = STATUS_READY;
+        tune_ack_pending = false;
+    }
     if (offset == REG_STATUS && (registers[REG_STATUS / 4] & STATUS_SNAPSHOT_PENDING) &&
         radio_clock && jiffies >= acknowledge_at) {
         registers[REG_STATUS / 4] &= ~STATUS_SNAPSHOT_PENDING;
@@ -110,10 +138,14 @@ static void writel(u32 value, void *address)
     assert(offset < sizeof(registers) && !(offset & 3));
     registers[offset / 4] = value;
     if (offset != REG_COMMAND) return;
-    if (value == CMD_BEGIN_TUNE) {
-        registers[REG_TUNE/4]=1; registers[REG_EPOCH/4]++;
-    } else if (value == CMD_COMMIT_TUNE) {
-        registers[REG_TUNE/4]=0;
+    if (value == CMD_BEGIN_TUNE || value == CMD_COMMIT_TUNE) {
+        unsigned *drops = value == CMD_BEGIN_TUNE ? &drop_begins : &drop_commits;
+        if (value == CMD_BEGIN_TUNE) begin_writes++; else commit_writes++;
+        if (*drops) { (*drops)--; return; }
+        if (tune_delay || late_tune) {
+            pending_command = value;
+            tune_due = jiffies + tune_delay;
+        } else accept_tune(value);
     } else if (value == CMD_SNAPSHOT) {
         assert(!(registers[REG_STATUS / 4] & STATUS_BUSY));
         snapshots++;
@@ -183,6 +215,9 @@ static void reset(void)
     snapshots = starts = applies = aborts = terminated = prepared = 0;
     invalid_until = interrupt_at = 0; lock_after = 1;
     interrupted = dma_issued = stalled_dma = stale_source = lost_source = prepare_failure = false;
+    drop_begins = drop_commits = begin_writes = commit_writes = 0;
+    tune_delay = pending_command = tune_polls = 0; tune_due = tune_ack_due = 0;
+    wrong_tune_epoch = late_tune = tune_ack_pending = false;
     terminate_error = 0; jiffies = 0; radio_clock = true; dma_len = 0;
     registers[REG_STATUS / 4] = STATUS_READY;
     for (unsigned i = 0; i < 4; i++) states[i] = ((9U + i) << 8) | 14;
@@ -275,6 +310,41 @@ int main(void)
     assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0 && tune.epoch==1);
     assert(do_ioctl(FPV_CAPTURE_SCAN_STATUS, &scan) == 0 && scan.epoch==1 && !scan.tuning);
     assert(do_read(sizeof(received)) > 0);
+    /* A pre-command idle status is not acknowledgement of BEGIN/COMMIT. */
+    reset(); tune_delay = 3; tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0);
+    assert(tune.epoch == 1 && registers[REG_TUNE / 4] == 1 && begin_writes == 1);
+    tune.action = FPV_CAPTURE_TUNE_COMMIT;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0);
+    assert(tune.epoch == 1 && registers[REG_TUNE / 4] == 0 && commit_writes == 1);
+    /* Late acceptance during a retry must still wait for the radio ACK. */
+    reset(); late_tune = true; tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0 && tune.epoch == 1);
+    assert(begin_writes == 1 && !tune_ack_pending && registers[REG_STATUS / 4] == STATUS_READY);
+    reset(); drop_begins = 1; tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0);
+    assert(tune.epoch == 1 && registers[REG_TUNE / 4] == 1 && begin_writes == 2);
+    drop_commits = 1; tune.action = FPV_CAPTURE_TUNE_COMMIT;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0);
+    assert(tune.epoch == 1 && !registers[REG_TUNE / 4] && commit_writes == 2);
+    reset(); drop_begins = 100; tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == -ETIMEDOUT && fpv.broken);
+    assert(begin_writes == 3 && !registers[REG_TUNE / 4] && !registers[REG_EPOCH / 4]);
+    assert(jiffies <= 300);
+    reset(); tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0);
+    drop_commits = 100; tune.action = FPV_CAPTURE_TUNE_COMMIT;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == -ETIMEDOUT && fpv.broken);
+    assert(commit_writes == 3 && registers[REG_TUNE / 4] == 1 && registers[REG_EPOCH / 4] == 1);
+    assert(do_read(sizeof(received)) == -EBUSY && !starts);
+    reset(); wrong_tune_epoch = true; tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == -ESTALE && fpv.broken && begin_writes == 1);
+    reset(); tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0);
+    wrong_tune_epoch = true; tune.action = FPV_CAPTURE_TUNE_COMMIT;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == -ESTALE && fpv.broken && commit_writes == 1);
+    reset(); registers[REG_EPOCH / 4] = UINT32_MAX; tune.action = FPV_CAPTURE_TUNE_BEGIN;
+    assert(do_ioctl(FPV_CAPTURE_TUNE, &tune) == 0 && tune.epoch == 0);
     puts("PASS driver coherent snapshots, bounded waits/signals, exact DMA mode/token, legacy/v2 config and ordered recovery");
     return 0;
 }

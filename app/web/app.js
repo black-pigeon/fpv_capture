@@ -1,7 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
-const phases = { idle: 'Ready', starting: 'Starting', initializing: 'Initializing RF', tuning: 'Tuning', observing: 'Observing sync', capturing: 'Validating frame', rf_settle: 'RF settling', ddc_tuning: 'Digital tuning', waiting_signal: 'Waiting for video sync', error: 'Acquisition error' };
-let selected = null, currentKey = '', firstStatus = true, busy = false, latest = null, frameLoading = false;
+const phases = { idle: 'Ready', starting: 'Starting', initializing: 'Initializing RF', tuning: 'Tuning', observing: 'Observing sync', capturing: 'Validating frame', rf_settle: 'RF settling', ddc_tuning: 'Digital tuning', waiting_signal: 'Waiting for video sync', gain_update: 'Applying gain', error: 'Error' };
+let selected = null, currentKey = '', firstStatus = true, busy = false, latest = null, frameLoading = false, gainBusy = false, gainDirty = false;
 function notice(text) { $('message').textContent = text; $('message').hidden = !text; }
 function frequency(hz) { return (hz / 1e6).toFixed(3); }
 async function command(path, body = '') {
@@ -18,9 +18,9 @@ function renderTracks(s) {
     }
     const rows = $('results'); rows.replaceChildren();
     if (!tracks.length) {
-        const row = rows.insertRow(), td = row.insertCell(); td.colSpan = 6; td.className = 'empty-row'; td.textContent = 'No confirmed records yet';
+        const row = rows.insertRow(), td = row.insertCell(); td.colSpan = 6; td.className = 'empty-row'; td.textContent = 'No records';
         $('frame').hidden = true; $('empty').hidden = false; $('download').hidden = true;
-        $('selected-frequency').textContent = 'No image yet'; $('selected-detail').textContent = 'Select a record below to view its image'; currentKey = '';
+        $('selected-frequency').textContent = 'No image'; $('selected-detail').textContent = ''; currentKey = '';
     }
     for (const t of tracks) {
         const row = rows.insertRow(); row.dataset.id = t.id; row.tabIndex = 0; row.setAttribute('aria-label', `View frame at ${frequency(t.frequency_hz)} MHz`);
@@ -35,7 +35,7 @@ function renderTracks(s) {
             if (key !== currentKey && !frameLoading) { frameLoading = true; $('frame').src = url; currentKey = key; }
             $('frame').hidden = false; $('empty').hidden = true;
             $('selected-frequency').textContent = `${frequency(t.frequency_hz)} MHz · ${t.standard}`;
-            $('selected-detail').textContent = `CH ${t.channel} · Epoch #${t.epoch} · ${t.width} × ${t.height} · ${t.age_ms < 1000 ? 'Updated just now' : `${(t.age_ms / 1000).toFixed(1)} s ago`}`;
+            $('selected-detail').textContent = `CH ${t.channel} · ${t.width} × ${t.height} · ${t.age_ms < 1000 ? 'Updated just now' : `${(t.age_ms / 1000).toFixed(1)} s ago`}`;
             $('frame-size').textContent = `${t.width} × ${t.height}`;
             $('download').href = url; $('download').download = `fpv-${frequency(t.frequency_hz)}-${t.standard}.bmp`; $('download').hidden = false;
         }
@@ -47,40 +47,42 @@ function render(s) {
     latest = s; $('led').className = 'led online'; $('connection').textContent = 'Connected'; $('simulation').hidden = !s.simulate;
     const locked = s.mode === 'lock', switching = s.switching || s.stopping;
     $('phase').textContent = s.stopping ? 'Stopping' : s.switching ? 'Switching mode' :
-        s.frequency_locked ? (s.signal_present ? 'Frequency held · video sync' : 'Frequency held · waiting for video') : phases[s.phase] || s.phase;
+        s.frequency_locked ? (s.signal_present ? 'Locked · Video' : 'Locked · Waiting') : phases[s.phase] || s.phase;
     $('start').disabled = (s.running && !locked) || switching || busy;
     $('start').firstChild.textContent = locked && s.running ? 'Resume scan ' : 'Start scan ';
     $('stop').disabled = !s.running || switching || busy;
     $('stop').textContent = locked ? 'Stop capture' : 'Stop scan';
     $('clear').disabled = s.running || busy;
-    $('lock').disabled = switching || busy;
+    $('lock').disabled = s.running || switching || busy || gainBusy;
     $('unlock').disabled = !locked || !s.running || switching || busy;
-    $('lock-frequency').disabled = switching || busy;
+    $('lock-frequency').disabled = s.running || switching || busy;
     for (const el of $('scan-form').elements)
-        if (el.tagName !== 'BUTTON' || el.id.startsWith('preset-')) el.disabled = (s.running && !locked) || switching || busy;
+        if (el.tagName !== 'BUTTON' || el.id.startsWith('preset-')) el.disabled = s.running || switching || busy;
     $('progress-title').textContent = locked ? 'Fixed frequency' : 'Scan progress';
     const percent = s.total_points ? Math.floor(100 * s.completed_points / s.total_points) : 0;
     $('progress-label').textContent = locked ? `${frequency(s.lock_hz)} MHz` : `${percent}%`;
     $('progress').hidden = locked;
     $('progress').max = s.total_points || 1; $('progress').value = s.completed_points;
     $('lo').textContent = s.lo_hz ? `${frequency(s.lo_hz)} MHz` : '— MHz';
-    $('rounds-title').textContent = locked ? 'Captured frames' : 'Completed passes';
+    $('rounds-title').textContent = locked ? 'Frames' : 'Passes';
     $('rounds').textContent = locked ? s.captured_frames : s.rounds;
     $('tune-counts').textContent = `${s.rf_tunes} RF changes · ${s.ddc_tunes} DDC settings`;
     $('window-phase').textContent = locked ? 'Fixed CH 0 · automatic PAL / NTSC' : `Digital phase ${s.window_phase} / ${s.window_phases}`;
-    $('lock-status').textContent = locked && s.running ?
-        `${s.frequency_locked ? 'Holding' : 'Acquiring'} ${frequency(s.lock_hz)} MHz · ${s.captured_frames} validated frames. ${s.signal_present ? 'Video sync present.' : 'Waiting for video sync; frequency stays fixed.'} Unlock frequency resumes band search.` :
-        'Lock a frequency manually or use the selected result. Unlock frequency resumes band search.';
+    $('lock-status').textContent = locked && s.running ? `${frequency(s.lock_hz)} MHz` : 'Not locked';
+    $('gain').disabled = switching || busy || gainBusy;
+    $('apply-gain').disabled = switching || busy || gainBusy || s.gain_pending;
+    $('gain-status').textContent = s.gain_pending ? `Applying ${s.gain_target_db} dB…` : `${s.config.gain_db} dB${s.running ? ' applied' : ''}`;
+    if (!gainDirty && !gainBusy && document.activeElement !== $('gain')) $('gain').value = s.gain_target_db;
     const centers = $('channel-centers'); centers.replaceChildren();
     for (const ch of s.channels) {
         const item = document.createElement('span');
         item.textContent = `CH ${ch.channel} · ${frequency(ch.frequency_hz)} MHz (${ch.offset_hz >= 0 ? '+' : ''}${frequency(ch.offset_hz)} MHz)`;
         centers.append(item);
     }
-    $('capture-errors').textContent = `Incomplete / rejected DMA frames: ${s.capture_errors}`;
+    $('capture-errors').textContent = `Capture errors: ${s.capture_errors}`;
     if (firstStatus) {
         const c = s.config; $('bands').value = c.bands.map(b => `${b[0] / 1e6}-${b[1] / 1e6}`).join('\n');
-        $('step').value = c.step_mhz; $('gain').value = c.gain_db; $('dwell').value = c.dwell_ms; $('settle').value = c.settle_ms; $('repeat').checked = !!c.repeat; if (s.mode === 'lock') $('lock-frequency').value = s.lock_hz / 1e6; firstStatus = false; gridNote();
+        $('step').value = c.step_mhz; $('gain').value = c.gain_db; $('dwell').value = c.dwell_ms; $('settle').value = c.settle_ms; $('repeat').checked = !!c.repeat; if (s.mode === 'lock') $('lock-frequency').value = s.lock_hz / 1e6; firstStatus = false;
     }
     if (s.error) notice(s.error);
     renderTracks(s);
@@ -91,18 +93,13 @@ async function poll() {
     } catch (e) { $('led').className = 'led'; $('connection').textContent = 'Disconnected'; notice(`Cannot connect to device: ${e.message}`); }
     finally { setTimeout(poll, latest && latest.running && latest.mode === 'lock' ? 200 : 700); }
 }
-function gridNote() {
-    $('grid-note').textContent = Number($('step').value) > 2
-        ? 'Coarse grid: faster search, but off-center signals may be missed. Use Fine to investigate a suspected range.'
-        : 'Fine grid: more observation time, smaller carrier offsets.';
-}
 function preset(step, dwell) {
-    if (latest && latest.running && latest.mode !== 'lock') return;
-    $('step').value = step; $('dwell').value = dwell; gridNote();
+    if (latest && latest.running) return;
+    $('step').value = step; $('dwell').value = dwell;
 }
 $('preset-fine').addEventListener('click', () => preset(2, 150));
 $('preset-fast').addEventListener('click', () => preset(8, 100));
-$('step').addEventListener('input', gridNote);
+
 // Read values explicitly: scan controls are disabled during a running scan
 // but their settings must still accompany a transition to fixed capture.
 function scanParams() {
@@ -122,6 +119,20 @@ async function startMode(locked) {
     } catch (err) { notice(err.message); }
     finally { busy = false; if (latest) render(latest); }
 }
+$('gain').addEventListener('input', () => { gainDirty = true; });
+$('gain-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    if (gainBusy || !$('gain-form').reportValidity()) return;
+    const value = $('gain').value;
+    gainBusy = true; notice(''); if (latest) render(latest);
+    try {
+        await command('/api/gain', new URLSearchParams({ gain_db: value }).toString());
+        gainDirty = false;
+        const response = await fetch('/api/status', { cache: 'no-store' });
+        if (response.ok) latest = await response.json();
+    } catch (err) { notice(err.message); }
+    finally { gainBusy = false; if (latest) render(latest); }
+});
 $('scan-form').addEventListener('submit', e => { e.preventDefault(); startMode(false); });
 $('lock-form').addEventListener('submit', e => { e.preventDefault(); startMode(true); });
 $('unlock').addEventListener('click', () => startMode(false));

@@ -9,10 +9,13 @@
 static int scenario;
 static unsigned snapshots;
 static atomic_int video_present=1, video_standard=0;
+static pthread_t owner;
 void fpv_backend_init(struct fpv_backend *b,int simulate) {memset(b,0,sizeof(*b));b->fd=-1;b->simulate=simulate;}
-int fpv_backend_open(struct fpv_backend *b,const struct fpv_scan_config *c,uint64_t lo) {(void)b;(void)c;(void)lo;return 0;}
+int fpv_backend_open(struct fpv_backend *b,const struct fpv_scan_config *c,uint64_t lo) {(void)b;(void)c;(void)lo;owner=pthread_self();return 0;}
 int fpv_backend_tune(struct fpv_backend *b,const struct fpv_scan_hop *h,unsigned gain) {(void)gain;b->rf_changed=b->hop.lo_hz!=h->lo_hz;b->hop=*h;b->epoch++;snapshots=0;return 0;}
 int fpv_backend_commit(struct fpv_backend *b) {(void)b;return 0;}
+int fpv_backend_set_gain(struct fpv_backend *b,unsigned gain)
+{assert(pthread_equal(owner,pthread_self()));b->radio_gain=gain;b->epoch++;snapshots=0;return 0;}
 void fpv_backend_close(struct fpv_backend *b) {(void)b;}
 int fpv_backend_status(struct fpv_backend *b,struct fpv_capture_scan_status *s)
 {
@@ -68,6 +71,21 @@ int main(void)
     pthread_mutex_lock(&s.mutex);
     assert(s.running && s.lock_ready && s.signal_present && s.ddc_tunes==1 && s.rf_tunes<=1 && s.rounds==0);
     pthread_mutex_unlock(&s.mutex);
+    assert(fpv_service_set_gain(&s,61)<0);
+    assert(!fpv_service_set_gain(&s,27));
+    for(unsigned n=0;n<200;n++) {
+        pthread_mutex_lock(&s.mutex);
+        int applied=!s.gain_pending&&s.config.gain_db==27;
+        pthread_mutex_unlock(&s.mutex);
+        if(applied)break;
+        struct timespec delay={0,10000000};nanosleep(&delay,NULL);
+    }
+    pthread_mutex_lock(&s.mutex);
+    assert(!s.gain_pending&&s.config.gain_db==27&&s.gain_updates==1);
+    assert(s.running&&s.current.lo_hz==c.lock_hz&&s.ddc_tunes==1);
+    unsigned after_gain=s.captured_frames;
+    pthread_mutex_unlock(&s.mutex);
+    wait_frames(&s,after_gain+2,c.lock_hz);
     atomic_store(&video_present,0);
     struct timespec loss_wait={0,200000000};nanosleep(&loss_wait,NULL);
     pthread_mutex_lock(&s.mutex);

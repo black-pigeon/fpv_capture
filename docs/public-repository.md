@@ -1,6 +1,6 @@
 # Public source and FPGA release boundary
 
-The public firmware build uses application and capture-driver source plus one reviewed FPGA hardware handoff, `firmware/board/e200/hardware/e200_fpv.xsa`. It does not require the FPGA source project. The adjacent `manifest.json` pins the XSA, its embedded bitstream and the supported interface versions.
+The public firmware build uses application and capture-driver source plus a reviewed FPGA hardware handoff for the selected board: `firmware/board/e200/hardware/e200_fpv.xsa` or `firmware/board/e310/hardware/e310_fpv.xsa`. It does not require the FPGA source project. The adjacent `manifest.json` pins the XSA, its embedded bitstream and the supported interface versions.
 
 ## Included
 
@@ -8,8 +8,8 @@ The public firmware build uses application and capture-driver source plus one re
 - `firmware/board/e200/linux/fpv_capture/`: the active GPL-2.0 DMAengine capture client, its Kconfig/Makefile and license text. It builds into the kernel as `CONFIG_FPV_CAPTURE=y`; upstream `CONFIG_XILINX_DMA=y` supplies the AXI DMA provider.
 - `app/include/linux/fpv_capture.h`: the canonical userspace ioctl/data interface, copied into the kernel driver during integration.
 - Host application and capture-driver tests.
-- E200 device-tree/boot configuration, Buildroot packages/overlay, source version locks and firmware/packaging scripts.
-- One XSA and its public hash/compatibility manifest. The XSA contains the bitstream, hardware/address descriptions and generated PS initialization files. It is not an opaque container and reveals hardware integration information; it does not include the FPGA RTL project.
+- E200/E310 device-tree/boot configuration, Buildroot packages/overlay, source version locks and firmware/packaging scripts.
+- One XSA and its public hash/compatibility manifest per supported board. The XSA contains the bitstream, hardware/address descriptions and generated PS initialization files. It is not an opaque container and reveals hardware integration information; it does not include the FPGA RTL project.
 
 Third-party sources retain their existing notices. The capture driver retains its GPL-2.0 declaration; its `COPYING` provides the GPLv2 text. No blanket license is added to other project-owned files.
 
@@ -65,7 +65,7 @@ make -C firmware hardware HW_FILE=/absolute/path/e200_fpv.xsa HW_MANIFEST=/absol
 make -C firmware sd HW_FILE=/absolute/path/e200_fpv.xsa HW_MANIFEST=/absolute/path/manifest.json
 ```
 
-XSA membership is intentionally restricted to the current E200 handoff format. A new FPGA release requires a reviewed manifest and compatible register/frame interfaces. Changing a hash does not prove the design works: validate new hardware privately before publishing it.
+XSA membership is intentionally restricted to the selected E200 or E310 handoff format. A new FPGA release requires a reviewed manifest and compatible register/frame interfaces. Changing a hash does not prove the design works: validate new hardware privately before publishing it.
 
 The optional packaging scripts validate the released XSA instead of private FPGA source hashes:
 
@@ -87,3 +87,24 @@ git diff --cached --stat
 The guard inspects the **Git index**. It permits only the named capture-driver files and the exact XSA/manifest pair; the indexed XSA must match its manifest and pass archive-member checks. It rejects other hardware exports, RTL, internal paths, binary/archive content, private keys and byte-identical copies of known local FPGA sources. Review the staged diff as well: this guard is a practical safeguard, not a proof that arbitrary text contains no confidential information.
 
 Publishing this source and XSA allows rebuilding the firmware software and reusing the released FPGA design. It does not allow rebuilding or modifying FPGA logic without the private FPGA project.
+
+## E310 selection
+
+The original ANTSDR E310 target uses `BOARD=e310` on all firmware make commands.
+Its released hardware pair is `firmware/board/e310/hardware/e310_fpv.xsa` and
+`manifest.json`. E310 uses PS GEM0 MIO Ethernet, PHY address 0, UART1 and 1 GiB
+DDR; the application selects its LVDS 2R2T and switched RF profile at build time.
+The shared capture driver remains in the E200 directory and is reused by both
+boards. This avoids maintaining two implementations of the capture ABI.
+
+```sh
+make -C firmware BOARD=e310 fetch-locked
+make -C firmware BOARD=e310 sd
+```
+
+The six files under `firmware/build/e310/sd/` have the same roles as E200, with
+`e310_fpv.bit` replacing `e200_fpv.bit`. The E310 kernel and U-Boot use isolated
+local source copies so board patches do not overwrite the E200 source trees.
+Keep FPGA sources and internal source manifests under the ignored private paths.
+E310 is a separate hardware target and requires board validation before use as
+a qualified release.

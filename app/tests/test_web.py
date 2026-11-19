@@ -2,6 +2,7 @@
 """Host-only end-to-end HTTP/worker/image tests with explicit simulated RF."""
 import http.client
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -37,6 +38,10 @@ try:
         text = request('GET', asset)[2].decode()
         assert not any('\u4e00' <= ch <= '\u9fff' for ch in text)
     assert request('GET', '/app.js')[0] == 200
+    # The offline brand image must be served as a real PNG, not a 404/HTML page.
+    status, kind, logo = request('GET', '/microphase-logo.png')
+    assert status == 200 and kind == 'image/png', (status, kind)
+    assert logo.startswith(b'\x89PNG\r\n\x1a\n')
     assert request('GET', '/../../etc/passwd')[0] == 404
     assert request('POST', '/api/start', 'bands=1-2')[0] == 400
     assert request('POST', '/api/start', 'bands=5798-5804', {'Origin':'http://other.invalid'})[0] == 403
@@ -54,6 +59,23 @@ try:
     status, kind, image = request('GET', f"/image/{track['id']}.bmp")
     assert status == 200 and kind == 'image/bmp' and image[:2] == b'BM'
     assert len(image) == 1078 + 720 * 576
+    # Gain updates do not restart the scan or discard its current records.
+    for invalid in ('', 'gain_db=', 'gain_db=-1', 'gain_db=61', 'gain_db=20.5',
+                    'gain_db=NaN', 'gain_db=20&gain_db=21', 'gain_db=20&bands=5700-5800',
+                    'gain_db=4294967296', 'gain_db=184467440737095516160'):
+        assert request('POST', '/api/gain', invalid)[0] == 400, invalid
+    assert request('POST', '/api/gain', 'gain_db=26', {'Origin':'http://other.invalid'})[0] == 403
+    prior_frames, prior_id = state['captured_frames'], track['id']
+    assert request('POST', '/api/gain', 'gain_db=26')[0] == 200
+    for _ in range(150):
+        state = json.loads(request('GET', '/api/status')[2])
+        if state['config']['gain_db'] == 26 and not state['gain_pending']: break
+        time.sleep(.02)
+    else: raise AssertionError(state)
+    assert state['running'] and state['mode'] == 'scan' and state['captured_frames'] >= prior_frames
+    assert any(t['id'] == prior_id for t in state['tracks'])
+    assert state['gain_updates'] == 1 and state['gain_target_db'] == 26
+    assert state['config']['bands'] == [[5798000000, 5804000000]]
     # Lock directly from a running scan; keep one epoch while frames advance.
     assert request('POST', '/api/start', 'mode=lock&frequency_mhz=NaN')[0] == 400
     locked_form = urllib.parse.urlencode(dict(mode='lock', frequency_mhz='5800', gain_db='20',
@@ -65,6 +87,8 @@ try:
         if state['mode'] == 'lock' and state['frequency_locked'] and state['captured_frames'] >= 3: break
         time.sleep(.02)
     else: raise AssertionError(state)
+    assert state['board'] == os.environ.get('FPV_EXPECT_BOARD', 'e200')
+    assert state['rx_port'] == 'A_BALANCED'
     assert state['running'] and state['signal_present'] and state['rounds'] == 0
     assert state['lo_hz'] == state['lock_hz'] == 5800000000 and len(state['channels']) == 1
     assert state['ddc_tunes'] == state['rf_tunes'] == 1
@@ -75,6 +99,18 @@ try:
     assert state['tracks'][0]['epoch'] == first_track['epoch']
     assert state['tracks'][0]['revision'] > first_track['revision']
     assert state['ddc_tunes'] == 1
+    # Locked acquisition accepts gain changes without moving the LO/DDCs.
+    prior_frames, prior_id = state['captured_frames'], state['tracks'][0]['id']
+    assert request('POST', '/api/gain', 'gain_db=42')[0] == 200
+    for _ in range(150):
+        state = json.loads(request('GET', '/api/status')[2])
+        if state['config']['gain_db'] == 42 and not state['gain_pending'] and state['captured_frames'] > prior_frames: break
+        time.sleep(.02)
+    else: raise AssertionError(state)
+    assert state['running'] and state['mode'] == 'lock' and state['frequency_locked']
+    assert state['lo_hz'] == state['lock_hz'] == 5800000000
+    assert state['rf_tunes'] == state['ddc_tunes'] == 1 and state['gain_updates'] == 1
+    assert state['tracks'][0]['id'] == prior_id and not state['error']
     # An empty frequency stays held; it must never fall back to scanning.
     assert request('POST', '/api/start', locked_form.replace('5800', '5700'))[0] == 200
     for _ in range(100):

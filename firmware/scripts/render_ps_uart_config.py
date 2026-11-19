@@ -27,6 +27,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--console-tty")
     parser.add_argument("--console-uart-base")
     parser.add_argument("--post-build-script")
+    parser.add_argument("--preserve-uart-numbering", action="store_true",
+                        help="Keep serialN mapped to uartN (Linux ttyPSN).")
     return parser.parse_args()
 
 
@@ -34,6 +36,7 @@ def console_settings(
     console_uart: int,
     console_tty: str | None = None,
     console_uart_base: str | None = None,
+    preserve_uart_numbering: bool = False,
 ) -> dict[str, str]:
     other_uart = 1 - console_uart
     default_base = {
@@ -44,6 +47,8 @@ def console_settings(
     tty = console_tty or f"ttyPS{console_uart}"
     return {
         "uart": str(console_uart),
+        "serial": str(console_uart) if preserve_uart_numbering else "0",
+        "other_serial": str(other_uart) if preserve_uart_numbering else "1",
         "other_uart": str(other_uart),
         "tty": tty,
         "base": base,
@@ -114,12 +119,12 @@ def render_linux_dtsi(text: str, settings: dict[str, str]) -> str:
 /* Generated console overrides. Keep PS UART selection in sync across boot stages. */
 / {{
 \taliases {{
-\t\tserial0 = &uart{settings["uart"]};
-\t\tserial1 = &uart{settings["other_uart"]};
+\t\tserial{settings["serial"]} = &uart{settings["uart"]};
+\t\tserial{settings["other_serial"]} = &uart{settings["other_uart"]};
 \t}};
 
 \tchosen {{
-\t\tstdout-path = "serial0:115200n8";{bootargs_line}
+\t\tstdout-path = "serial{settings["serial"]}:115200n8";{bootargs_line}
 \t}};
 }};
 
@@ -135,12 +140,12 @@ def render_uboot_dts(text: str, settings: dict[str, str]) -> str:
 /* Generated console overrides. Keep PS UART selection in sync across boot stages. */
 / {{
 \taliases {{
-\t\tserial0 = &uart{settings["uart"]};
-\t\tserial1 = &uart{settings["other_uart"]};
+\t\tserial{settings["serial"]} = &uart{settings["uart"]};
+\t\tserial{settings["other_serial"]} = &uart{settings["other_uart"]};
 \t}};
 
 \tchosen {{
-\t\tstdout-path = "serial0:115200n8";
+\t\tstdout-path = "serial{settings["serial"]}:115200n8";
 \t}};
 }};
 
@@ -212,6 +217,7 @@ def main() -> int:
         args.console_uart,
         args.console_tty,
         args.console_uart_base,
+        args.preserve_uart_numbering,
     )
     source = pathlib.Path(args.source)
     output = pathlib.Path(args.output)

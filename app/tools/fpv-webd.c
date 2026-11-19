@@ -1,5 +1,6 @@
 /* Offline HTTP interface; hardware ownership is confined to the scan worker. */
 #include "fpv_service.h"
+#include "fpv_stream.h"
 #include <arpa/inet.h>
 #include <ctype.h>
 #include <errno.h>
@@ -42,7 +43,7 @@ static void asset(int fd,const char *root,const char *name,const char *type)
     if(got==(size_t)size)response(fd,200,type,buf,got);else message(fd,500,"Asset read failed");
     free(buf);
 }
-static void client(int fd,struct fpv_service *s,const char *root)
+static void client(int fd,struct fpv_service *s,struct fpv_stream_server *streams,const char *root)
 {
     char req[10240];size_t used=0,header_len=0,body_len=0;
     struct timeval timeout={1,0};setsockopt(fd,SOL_SOCKET,SO_RCVTIMEO,&timeout,sizeof(timeout));setsockopt(fd,SOL_SOCKET,SO_SNDTIMEO,&timeout,sizeof(timeout));
@@ -86,12 +87,26 @@ static void client(int fd,struct fpv_service *s,const char *root)
             struct fpv_scan_config cfg;char error[256];
             if(fpv_scan_config_parse(req+header_len,&cfg,error,sizeof(error))<0){message(fd,400,error);return;}
             if(fpv_service_start(s,&cfg)<0){message(fd,409,"Acquisition is busy. Wait for switching/stopping, or stop before starting another scan.");return;}
+        } else if(!strcmp(path,"/api/gain")) {
+            const char *body=req+header_len;char *end;unsigned long gain;
+            if(strncmp(body,"gain_db=",8)||body[8]<'0'||body[8]>'9'){message(fd,400,"Gain must be 0..60 dB");return;}
+            errno=0;gain=strtoul(body+8,&end,10);
+            if(errno||*end||gain>60){message(fd,400,"Gain must be 0..60 dB");return;}
+            if(fpv_service_set_gain(s,(unsigned)gain)<0){message(fd,409,"Wait for switching/stopping");return;}
         } else if(!strcmp(path,"/api/stop"))fpv_service_stop(s);
         else if(!strcmp(path,"/api/clear")){if(fpv_service_clear(s)<0){message(fd,409,"Stop the scan first.");return;}}
         else {message(fd,404,"Not found");return;}
         message(fd,200,"OK");return;
     }
     if(strcmp(method,"GET")){message(fd,405,"Method not allowed");return;}
+    if(!strncmp(path,"/api/v1/stream",14) && (path[14]==0 || path[14]=='?')) {
+        if(fpv_stream_open(streams,fd,path+14)<0) {
+            if(errno==EINVAL)message(fd,400,"Invalid stream query");
+            else if(errno==EBUSY)message(fd,503,"Stream client limit reached");
+            else message(fd,500,"Stream allocation failed");
+        }
+        return;
+    }
     if(!strcmp(path,"/api/status")) {
         char *json=fpv_service_status(s);if(!json){message(fd,500,"Out of memory");return;}
         response(fd,200,"application/json; charset=utf-8",json,strlen(json));free(json);return;
@@ -104,12 +119,13 @@ static void client(int fd,struct fpv_service *s,const char *root)
     if(!strcmp(path,"/")||!strcmp(path,"/index.html"))asset(fd,root,"index.html","text/html; charset=utf-8");
     else if(!strcmp(path,"/style.css"))asset(fd,root,"style.css","text/css; charset=utf-8");
     else if(!strcmp(path,"/app.js"))asset(fd,root,"app.js","text/javascript; charset=utf-8");
+    else if(!strcmp(path,"/microphase-logo.png"))asset(fd,root,"microphase-logo.png","image/png");
     else message(fd,404,"Not found");
 }
 static void usage(const char *name)
 {
     printf("Usage: %s [--listen IPv4] [--port 80] [--web-root /usr/share/e200-fpv/web] [--simulate]\n",name);
-    puts("Starts the web UI only. RF initialization begins when Start is pressed.\n--simulate is host testing only and clearly labels generated results.");
+    puts("Starts web/control and /api/v1/stream. RF initialization begins when Start is pressed.\n--simulate is host testing only and clearly labels generated results.");
 }
 int main(int argc,char **argv)
 {
@@ -130,15 +146,17 @@ int main(int argc,char **argv)
     if(bind(fd,(struct sockaddr *)&address,sizeof(address))<0||listen(fd,8)<0){perror("HTTP listen");close(fd);return 1;}
     struct fpv_service service;
     if(fpv_service_init(&service,simulate)){fputs("Scan worker failed\n",stderr);close(fd);return 1;}
+    struct fpv_stream_server streams;
+    if(fpv_stream_init(&streams,&service.feed)<0){perror("Stream workers");fpv_service_destroy(&service);close(fd);return 1;}
     struct sigaction action={0};action.sa_handler=stop_signal;sigemptyset(&action.sa_mask);sigaction(SIGINT,&action,NULL);sigaction(SIGTERM,&action,NULL);
-    printf("E200 FPV web listening on %s:%u (%s)\n",listen_ip,port,simulate?"SIMULATION":"RF hardware");fflush(stdout);
+    printf("%s FPV web listening on %s:%u (%s)\n",fpv_board_current()->name,listen_ip,port,simulate?"SIMULATION":"RF hardware");fflush(stdout);
     while(!quitting) {
         fd_set set;FD_ZERO(&set);FD_SET(fd,&set);struct timeval timeout={0,250000};
         int ret=select(fd+1,&set,NULL,NULL,&timeout);
         if(ret<0){if(errno==EINTR)continue;perror("select");break;}
         if(!ret)continue;
         int peer=accept4(fd,NULL,NULL,SOCK_CLOEXEC);if(peer<0)continue;
-        client(peer,&service,root);close(peer);
+        client(peer,&service,&streams,root);close(peer);
     }
-    close(fd);fpv_service_destroy(&service);return 0;
+    close(fd);fpv_stream_destroy(&streams);fpv_service_destroy(&service);return 0;
 }

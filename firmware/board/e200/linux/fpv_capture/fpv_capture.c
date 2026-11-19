@@ -82,6 +82,50 @@ static int fpv_wait_idle(struct fpv_capture *fpv)
 		!(value & STATUS_BUSY) && (value & STATUS_READY), 20, 100000);
 }
 
+/* Idle may still describe the state preceding a command. Confirm the
+ * transaction's state and epoch before allowing RF access or frame capture.
+ * A command which left both unchanged may be retried; an unexpected epoch
+ * is never accepted or retried as a different tuning transaction. */
+static int fpv_tune_command(struct fpv_capture *fpv, u32 command,
+                           u32 expected_tune, u32 expected_epoch)
+{
+	u32 value, previous_epoch = expected_epoch - expected_tune;
+	int attempt, ret;
+
+	for (attempt = 0; attempt < 3; attempt++) {
+		ret = fpv_wait_idle(fpv);
+		if (ret)
+			return ret;
+		if (attempt) {
+			value = readl(fpv->regs + REG_TUNE);
+			if (value == expected_tune &&
+			    readl(fpv->regs + REG_EPOCH) == expected_epoch)
+				return fpv_wait_idle(fpv);
+			if (value != !expected_tune ||
+			    readl(fpv->regs + REG_EPOCH) != previous_epoch)
+				return -ESTALE;
+		}
+		writel(command, fpv->regs + REG_COMMAND);
+		ret = readl_poll_timeout(fpv->regs + REG_TUNE, value,
+			value == expected_tune, 20, 100000);
+		if (!ret) {
+			ret = fpv_wait_idle(fpv);
+			if (ret)
+				return ret;
+			return readl(fpv->regs + REG_EPOCH) == expected_epoch ?
+				0 : -ESTALE;
+		}
+		if (readl(fpv->regs + REG_EPOCH) != previous_epoch)
+			return -ESTALE;
+		pr_warn_ratelimited("fpv-capture: command %#x not acknowledged "
+			"(tune=%u epoch=%u status=%#x), attempt %u/3\n",
+			command, readl(fpv->regs + REG_TUNE),
+			readl(fpv->regs + REG_EPOCH),
+			readl(fpv->regs + REG_STATUS), attempt + 1);
+	}
+	return ret;
+}
+
 /* Snapshot commands are exclusive. Both a previous pending handshake and
  * this request consume the same interruptible deadline, including no-clock
  * operation. No snapshot is requested during probe. */
@@ -272,23 +316,21 @@ static long fpv_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
             ret = -EBUSY;
             if (readl(fpv->regs + REG_TUNE))
                 goto out;
+            tune.epoch = readl(fpv->regs + REG_EPOCH) + 1;
             ret = fpv_recover(fpv);
             if (ret)
                 goto out;
-            writel(CMD_BEGIN_TUNE, fpv->regs + REG_COMMAND);
+            ret = fpv_tune_command(fpv, CMD_BEGIN_TUNE, 1, tune.epoch);
         } else if (tune.action == FPV_CAPTURE_TUNE_COMMIT) {
             ret = -EINVAL;
             if (!readl(fpv->regs + REG_TUNE))
                 goto out;
-            ret = fpv_wait_idle(fpv);
-            if (ret)
-                goto out;
-            writel(CMD_COMMIT_TUNE, fpv->regs + REG_COMMAND);
+            tune.epoch = readl(fpv->regs + REG_EPOCH);
+            ret = fpv_tune_command(fpv, CMD_COMMIT_TUNE, 0, tune.epoch);
         } else {
             ret = -EINVAL;
             goto out;
         }
-        ret = fpv_wait_idle(fpv);
         if (ret) {
             fpv->broken = true;
             goto out;
