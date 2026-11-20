@@ -14,6 +14,8 @@ int main(void)
     p[1024+100]=1000000;
     assert(!fpv_spectrum_add(s,5750000000ULL,20,7,1000,p,2048));
     char *json=fpv_spectrum_json(s,1100);assert(json);
+    assert(strstr(json,"\"end_hz\":5800000000"));
+    assert(strstr(json,"\"end_hz\":5950000000"));
     assert(strstr(json,"\"available\":true"));assert(strstr(json,"\"bin_hz\":30000"));
     assert(strstr(json,"null"));assert(strstr(json,"\"age_ms\":100"));free(json);
     unsigned k;float db;

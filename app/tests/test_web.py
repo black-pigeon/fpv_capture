@@ -33,7 +33,11 @@ try:
     else: raise AssertionError('server did not start')
     assert json.loads(request('GET', '/api/status')[2])['config']['step_mhz'] == 6
     assert json.loads(request('GET', '/api/status')[2])['config']['gain_db'] == 50
+    defaults = json.loads(request('GET', '/api/status')[2])['config']['bands']
+    assert defaults == [[2200000000,2500000000],[5100000000,5400000000],[5600000000,5900000000]]
     html = request('GET', '/')[2].decode()
+    assert 'aria-describedby="bands-help"' in html and 'One range per line' in html and 'Up to 8 ranges' in html
+    assert '>2200-2500\n5100-5400\n5600-5900</textarea>' in html
     assert '<html lang="en">' in html and 'Search grid' in html and 'Fast · 8 MHz' in html and 'Lock frequency' in html
     for asset in ('/', '/app.js'):
         text = request('GET', asset)[2].decode()

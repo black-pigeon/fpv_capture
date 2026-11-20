@@ -31,6 +31,8 @@ class PublicTreeTest(unittest.TestCase):
 
     def test_application_interface_and_public_patch_allowed(self):
         for name, data in (
+            ('README.md', b'# FPV\n\n[Chinese](README.zh-CN.md)\n'),
+            ('README.zh-CN.md', b'# FPV\n\n[English](README.md)\n'),
             ('app/include/linux/fpv_capture.h', b'struct capture_request { unsigned channel; };\n'),
             ('firmware/board/e200/linux/system-user.dtsi', b'/ { model = "E200"; };\n'),
             ('firmware/board/e200/patches/linux/board.patch', b'+CONFIG_REALTEK_PHY=y\n'),
@@ -155,6 +157,7 @@ class PublicTreeTest(unittest.TestCase):
             'fpga/example.txt', 'hardware/example.txt',
             'images/e200-fpv-20261119-bootfiles.tar.gz',
             'docs/public-repository.md', 'tools/fpv_receiver/README.md',
+            'app/README.zh-CN.md', 'README.private.md',
             'firmware/board/e200/linux/axi_dma/driver.c',
             'firmware/board/e200/linux/fpv_capture/driver.c',
             'firmware/board/e200/patches/autosave/source.patch',

@@ -77,7 +77,7 @@ char *fpv_spectrum_json(struct fpv_spectrum_store *s,uint64_t now)
     fprintf(f,"{\"available\":%s,\"error\":%d,\"revision\":%u,\"bin_hz\":30000,\"fft_size\":2048,\"averages\":16,\"sample_rate\":61440000,\"unit\":\"dBFS\",\"gain_db\":%u,\"epoch\":%u,\"lo_hz\":%llu,\"age_ms\":%llu,\"bands\":[",s->available?"true":"false",s->error,s->revision,s->gain,s->epoch,(unsigned long long)s->lo,(unsigned long long)(s->last_ms&&now>=s->last_ms?now-s->last_ms:0));
     for(unsigned b=0;b<s->bands_count;b++) {
         struct band *band=&s->bands[b];unsigned stride=(band->count+2047)/2048;
-        fprintf(f,"%s{\"start_hz\":%llu,\"step_hz\":%llu,\"values\":[",b?",":"",(unsigned long long)band->start,(unsigned long long)(BIN*stride));
+        fprintf(f,"%s{\"start_hz\":%llu,\"end_hz\":%llu,\"step_hz\":%llu,\"values\":[",b?",":"",(unsigned long long)band->start,(unsigned long long)band->end,(unsigned long long)(BIN*stride));
         const char *keys[]={"values","age_ms","epoch","lo_hz"};
         for(unsigned field=0;field<4;field++) {
             if(field)fprintf(f,"],\"%s\":[",keys[field]);

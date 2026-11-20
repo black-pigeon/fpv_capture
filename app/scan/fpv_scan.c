@@ -9,8 +9,11 @@
 
 void fpv_scan_defaults(struct fpv_scan_config *c)
 {
-    memset(c,0,sizeof(*c)); c->bands[0]=(struct fpv_scan_band){5650000000ULL,5950000000ULL};
-    c->band_count=1;c->step_hz=6000000;c->dwell_ms=150;c->settle_ms=20;c->gain_db=50;c->repeat=1;
+    memset(c,0,sizeof(*c));
+    c->bands[0]=(struct fpv_scan_band){2200000000ULL,2500000000ULL};
+    c->bands[1]=(struct fpv_scan_band){5100000000ULL,5400000000ULL};
+    c->bands[2]=(struct fpv_scan_band){5600000000ULL,5900000000ULL};
+    c->band_count=3;c->step_hz=6000000;c->dwell_ms=150;c->settle_ms=20;c->gain_db=50;c->repeat=1;
 }
 static unsigned band_points(const struct fpv_scan_config *c,unsigned b)
 {

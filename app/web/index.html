@@ -8,7 +8,10 @@
 <aside class="panel controls">
 <h1>Scan</h1>
 <form id="scan-form">
-<label for="bands">Frequency ranges <span>MHz</span></label><textarea id="bands" name="bands" rows="2" required spellcheck="false" placeholder="5650-5950">5650-5950</textarea>
+<label for="bands">Frequency ranges <span>MHz</span></label><textarea id="bands" name="bands" rows="3" required spellcheck="false" aria-describedby="bands-help" placeholder="2200-2500&#10;5100-5400&#10;5600-5900">2200-2500
+5100-5400
+5600-5900</textarea>
+<p id="bands-help" class="field-help">One range per line: start-end in MHz.<br>Up to 8 ranges (70-6000 MHz).</p>
 <label for="step">Search grid <span>MHz</span></label><input id="step" name="step_mhz" type="number" min="0.1" max="10" step="0.1" value="6" required>
 <details class="advanced"><summary>Advanced</summary>
 <div class="presets" role="group" aria-label="Scan presets"><button id="preset-fine" class="quiet" type="button">Fine · 2 MHz</button><button id="preset-fast" class="quiet" type="button">Fast · 8 MHz</button></div>

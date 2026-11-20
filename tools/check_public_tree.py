@@ -15,6 +15,7 @@ from hardware_input import SOURCE_PAYLOAD, validate_xsa
 
 PUBLIC_XSA = 'firmware/board/e200/hardware/e200_fpv.xsa'
 PUBLIC_MANIFEST = 'firmware/board/e200/hardware/manifest.json'
+PUBLIC_READMES = {'README.md', 'README.zh-CN.md'}
 PUBLIC_HARDWARE = {
     'e200': (PUBLIC_XSA, PUBLIC_MANIFEST),
     'e310': ('firmware/board/e310/hardware/e310_fpv.xsa',
@@ -62,9 +63,9 @@ def path_reason(name):
         return 'private/local path'
     if name.startswith('docs/'):
         return 'internal documentation'
-    if name.endswith('.md') and name != 'README.md':
-        return 'documentation belongs in the top-level README'
-    if name in ('.gitignore', 'README.md'):
+    if name.endswith('.md') and name not in PUBLIC_READMES:
+        return 'documentation belongs in the top-level English or Chinese README'
+    if name == '.gitignore' or name in PUBLIC_READMES:
         return None
     if p.parts[0] not in ALLOWED_ROOTS:
         return 'path outside the application/integration allowlist'

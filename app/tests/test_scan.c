@@ -8,6 +8,9 @@ int main(void)
     struct fpv_scan_hop hop;
     char error[160];
     fpv_scan_defaults(&cfg);assert(cfg.gain_db==50);
+    assert(cfg.band_count==3);
+    const uint64_t defaults[][2]={{2200000000ULL,2500000000ULL},{5100000000ULL,5400000000ULL},{5600000000ULL,5900000000ULL}};
+    for(unsigned i=0;i<3;i++)assert(cfg.bands[i].start_hz==defaults[i][0]&&cfg.bands[i].end_hz==defaults[i][1]);
     assert(fpv_scan_config_parse("bands=5650-5657&step_mhz=2&dwell_ms=150&settle_ms=20&gain_db=20&repeat=1",&cfg,error,sizeof(error))==0);
     assert(fpv_scan_points(&cfg)==5);
     assert(fpv_scan_plan(&cfg,0,&hop)==0 && hop.enable_mask==15 && hop.lo_hz==5653500000ULL);
@@ -19,13 +22,16 @@ int main(void)
     assert(fpv_scan_plan(&cfg,1,&hop)==0 && hop.lo_hz==6000000000ULL);
     const char *bad[]={"bands=69-71","bands=6000-6001","bands=5900-5800","bands=NaN-5900","bands=5650-5900&step_mhz=0", "bands=5650-5900&dwell_ms=2","bands=5650-5900&gain_db=80","bands=5650-5900&repeat=3","bands=5650-5900&bands=5700-5800","bands=5650-5900&shell=x","bands=5650-5900%00evil"};
     for(unsigned i=0;i<sizeof(bad)/sizeof(bad[0]);i++)assert(fpv_scan_config_parse(bad[i],&cfg,error,sizeof(error))<0);
+    assert(!fpv_scan_config_parse("bands=100-110%0A200-210%0A300-310%0A400-410%0A500-510%0A600-610%0A700-710%0A800-810",&cfg,error,sizeof(error)));
+    assert(cfg.band_count==8);
+    assert(fpv_scan_config_parse("bands=100-110%0A200-210%0A300-310%0A400-410%0A500-510%0A600-610%0A700-710%0A800-810%0A900-910",&cfg,error,sizeof(error))<0);
     /* Every requested center is visited once, all phases within a window
      * keep their LO; endpoint and tuning limits include NCO rounding. */
     const unsigned steps[]={100000,2000000,6000000,8000000,10000000};
     const unsigned spans[]={0,1,7,38,40,41,79,300};
     for(unsigned a=0;a<sizeof(steps)/sizeof(steps[0]);a++)for(unsigned j=0;j<8;j++) {
         fpv_scan_defaults(&cfg);cfg.step_hz=steps[a];
-        cfg.bands[0]=(struct fpv_scan_band){70000000,70000000+(uint64_t)spans[j]*1000000+123};
+        cfg.band_count=1;cfg.bands[0]=(struct fpv_scan_band){70000000,70000000+(uint64_t)spans[j]*1000000+123};
         unsigned total=fpv_scan_points(&cfg),seen[4096]={0},prev_window=~0U;
         uint64_t lo=0;
         for(unsigned p=0;p<total;p+=hop.count) {
@@ -66,6 +72,7 @@ int main(void)
     assert(visited==fpv_scan_points(&cfg));
     fpv_scan_defaults(&cfg);
     assert(cfg.step_hz==6000000);
+    cfg.band_count=1;cfg.bands[0]=(struct fpv_scan_band){5650000000ULL,5950000000ULL};
     /* A 6 MHz grid fills a window with seven centers rather than
      * changing the RF LO after its first four-channel observation. */
     assert(!fpv_scan_plan(&cfg,0,&hop));

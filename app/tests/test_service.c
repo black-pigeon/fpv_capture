@@ -54,7 +54,7 @@ static void wait_frames(struct fpv_service *s,unsigned frames,uint64_t frequency
 int main(void)
 {
     struct fpv_service s;assert(!fpv_service_init(&s,1));
-    struct fpv_scan_config c;fpv_scan_defaults(&c);c.bands[0]=(struct fpv_scan_band){5800000000ULL,5800000000ULL};c.repeat=0;c.dwell_ms=100;c.settle_ms=0;
+    struct fpv_scan_config c;fpv_scan_defaults(&c);c.band_count=1;c.bands[0]=(struct fpv_scan_band){5800000000ULL,5800000000ULL};c.repeat=0;c.dwell_ms=100;c.settle_ms=0;
     for(scenario=0;scenario<4;scenario++) {
         assert(!fpv_service_start(&s,&c));wait_idle(&s);
         unsigned tracks=0;

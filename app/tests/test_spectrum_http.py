@@ -29,7 +29,8 @@ try:
     post('/api/start','mode=lock&frequency_mhz=5800&gain_db=20')
     j=wait(lambda j:j['available'])
     assert j['bin_hz']==30000 and j['averages']==16 and j['unit']=='dBFS'
-    b=j['bands'][0];assert len(b['epoch'])==len(b['values'])==len(b['lo_hz']);peak=max(range(len(b['values'])),key=lambda k:b['values'][k] if b['values'][k] is not None else -999)
+    b=j['bands'][0];assert b['start_hz']==5773000000 and b['end_hz']==5827000000
+    assert len(b['epoch'])==len(b['values'])==len(b['lo_hz']);peak=max(range(len(b['values'])),key=lambda k:b['values'][k] if b['values'][k] is not None else -999)
     assert abs(b['start_hz']+peak*b['step_hz']-5800e6)<=300000
     rev=j['revision'];wait(lambda j:j['revision']>rev)
     post('/api/gain','gain_db=30');wait(lambda j:j['gain_db']==30 and j['available'])

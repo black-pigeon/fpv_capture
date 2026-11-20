@@ -9,7 +9,7 @@
 static unsigned check_endpoint_band(uint64_t start,uint64_t end,unsigned step)
 {
  struct fpv_scan_config cfg;fpv_scan_defaults(&cfg);
- cfg.bands[0]=(struct fpv_scan_band){start,end};cfg.step_hz=step;
+ cfg.band_count=1;cfg.bands[0]=(struct fpv_scan_band){start,end};cfg.step_hz=step;
  const struct fpv_board *board=fpv_board_current();
  unsigned total=fpv_scan_points(&cfg),visited=0,errors=0,previous_window=~0U;
  unsigned *seen=calloc(total,sizeof(*seen));assert(seen);
@@ -49,7 +49,7 @@ int main(void)
  const struct fpv_board *board=fpv_board_current();
  for(unsigned s=0;s<6;s++)for(unsigned variant=0;variant<6;variant++) {
   struct fpv_scan_config cfg;fpv_scan_defaults(&cfg);cfg.step_hz=steps[s];
-  cfg.bands[0]=(struct fpv_scan_band){2977000000ULL+variant*123,3023000000ULL+variant*321};
+  cfg.band_count=1;cfg.bands[0]=(struct fpv_scan_band){2977000000ULL+variant*123,3023000000ULL+variant*321};
   unsigned total=fpv_scan_points(&cfg),seen[1024]={0},visited=0;
   struct fpv_scan_hop h;uint64_t previous_lo=0;unsigned previous_window=~0U;
   for(unsigned point=0;point<total;point+=h.count) {
