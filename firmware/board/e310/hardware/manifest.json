@@ -3,12 +3,12 @@
   "board": "e310",
   "xsa": {
     "file": "e310_fpv.xsa",
-    "sha256": "04cc2005ac42ceebefa0cf0c0be819215b4112370138d436bc05dcfe7663350b",
-    "bytes": 1516439
+    "sha256": "d4a286685e67a7e4661fe5ca7808fe2fdacde1c1ff76468d76e6748ba126c6de",
+    "bytes": 1654027
   },
   "bitstream": {
     "member": "e310_fpv.bit",
-    "sha256": "863732c8c0f946c581a40e95e946b305fc0413b07c2efece340f8c19ea5b6b88",
+    "sha256": "b606a74a043feae76fa46c86ae91323c98ce8bef609ab2b46e710092f828a5f1",
     "bytes": 4045668
   },
   "capture": {
@@ -23,5 +23,14 @@
     "phy_address": 0,
     "converter_address": null,
     "forced_phy_id": false
+  },
+  "spectrum": {
+    "register_version": 1,
+    "bins": 2048,
+    "sample_rate_hz": 61440000,
+    "averages": 16,
+    "dma_count": 1,
+    "control_base": "0x43c40000",
+    "dma_base": "0x40440000"
   }
 }

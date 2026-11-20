@@ -71,7 +71,7 @@ void fpv_radio_close(struct fpv_radio *r) {if(r->phy)ad9361_remove(r->phy);r->ph
 int main(void)
 {
     struct fpv_backend b;struct fpv_scan_config cfg;struct fpv_scan_hop h;
-    fpv_scan_defaults(&cfg);assert(!fpv_scan_plan(&cfg,0,&h));fpv_backend_init(&b,0);
+    fpv_scan_defaults(&cfg);cfg.gain_db=20;assert(!fpv_scan_plan(&cfg,0,&h));fpv_backend_init(&b,0);
     assert(!fpv_backend_open(&b,&cfg,h.lo_hz)&&inits==1);
     assert(!fpv_backend_tune(&b,&h,20)&&inhibited&&b.epoch==1&&configs==1);
     assert(!fpv_backend_commit(&b)&&!inhibited&&commits==1);

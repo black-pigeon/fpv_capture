@@ -28,7 +28,7 @@ PUBLIC_ASSET_HASHES = {
 }
 PUBLIC_DRIVER_FILES = {
     'firmware/board/e200/linux/fpv_capture/' + name
-    for name in ('Kconfig', 'Makefile', 'fpv_capture.c', 'COPYING')
+    for name in ('Kconfig', 'Makefile', 'fpv_capture.c', 'fpv_spectrum.c', 'COPYING')
 }
 
 PRIVATE_PREFIXES = (

@@ -3,13 +3,13 @@
   "board": "e200",
   "xsa": {
     "file": "e200_fpv.xsa",
-    "sha256": "85a5fe272a1a669613b9ffbab98979ede7bd39aa5930d212d31af5f0a2f85928",
-    "bytes": 1524089
+    "sha256": "e9b59fc32573c1cb17d081b4207a912fcc60f63ab841a9b09eb66dda801b444d",
+    "bytes": 1671770
   },
   "bitstream": {
     "member": "e200_fpv.bit",
-    "sha256": "36e09865a8dd483d67e65578905f827d279eeb848fb5175542610746eb1f9bcf",
-    "bytes": 2597346
+    "sha256": "514d1ec46a2760eb4bba74d29f06516473b8657f8321abdb09cbf52dc134ec58",
+    "bytes": 2708334
   },
   "capture": {
     "register_version": 6,
@@ -22,5 +22,14 @@
     "phy_address": 1,
     "converter_address": 8,
     "forced_phy_id": false
+  },
+  "spectrum": {
+    "register_version": 1,
+    "bins": 2048,
+    "sample_rate_hz": 61440000,
+    "averages": 16,
+    "dma_count": 1,
+    "control_base": "0x43c40000",
+    "dma_base": "0x40440000"
   }
 }

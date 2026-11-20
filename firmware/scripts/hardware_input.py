@@ -20,10 +20,13 @@ MAX_EXPANDED_BYTES = 64 * 1024 * 1024
 # Vivado project/reconstruction scripts, checkpoints or debug probes.
 COMMON_MEMBERS = frozenset({
     'system.bda', 'system.hwh',
-    'system_fpv_ddr_0.hwh', 'sysdef.xml', 'xsa.xml', 'xsa.json',
+    'system_fpv_ddr_0.hwh', 'system_spectrum_ddr_0.hwh', 'sysdef.xml', 'xsa.xml', 'xsa.json',
     'aie_primitive.json', 'ps7_init.c', 'ps7_init.h', 'ps7_init_gpl.c',
     'ps7_init_gpl.h', 'ps7_init.html', 'ps7_init.tcl',
 })
+SPECTRUM = {'register_version': 1, 'bins': 2048,
+            'sample_rate_hz': 61440000, 'averages': 16, 'dma_count': 1,
+            'control_base': '0x43c40000', 'dma_base': '0x40440000'}
 CAPTURE = {'register_version': 6, 'packet_version': 2, 'channels': 4, 'dma_count': 1}
 ETHERNET = {'phy_mode': 'rgmii-id', 'phy_address': 1,
             'converter_address': 8, 'forced_phy_id': False}
@@ -65,9 +68,11 @@ def validate_xsa(data, manifest, board='e200'):
     hardware_paths(board)
     bit_member = f'{board}_fpv.bit'
     allowed_members = BOARD_MEMBERS[board]
-    if not isinstance(manifest, dict) or set(manifest) != {
+    if not isinstance(manifest, dict) or set(manifest) - {'spectrum'} != {
             'format', 'board', 'xsa', 'bitstream', 'capture', 'ethernet'}:
         raise ValueError('invalid public hardware manifest fields')
+    if 'spectrum' in manifest and manifest['spectrum'] != SPECTRUM:
+        raise ValueError('unsupported spectrum hardware contract')
     if manifest['format'] != f'{board}-fpv-xsa-v1' or manifest['board'] != board:
         raise ValueError('unsupported hardware manifest format or board')
     if manifest['capture'] != CAPTURE or manifest['ethernet'] != BOARD_ETHERNET[board]:

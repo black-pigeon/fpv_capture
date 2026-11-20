@@ -1,11 +1,29 @@
 #include "fpv_service.h"
 #include <errno.h>
+#include "fpv_spectrum_device.h"
+#include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
 static uint64_t now_ms(void) { struct timespec t;clock_gettime(CLOCK_MONOTONIC,&t);return (uint64_t)t.tv_sec*1000+t.tv_nsec/1000000; }
+/* RF worker is the only capture owner: gain/LO cannot change during a read. */
+static void spectrum_capture(struct fpv_service *s)
+{
+    uint64_t ms=now_ms();if(ms<s->spectrum_ms)return;
+    uint32_t power[2048];int e=0;
+    if(fpv_spectrum_device_read(&s->spectrum_fd,s->backend.simulate,s->backend.radio_lo_hz,power)<0)e=errno;
+    pthread_mutex_lock(&s->mutex);
+    if(e)fpv_spectrum_error(s->spectrum,e);
+    else fpv_spectrum_add(s->spectrum,s->backend.radio_lo_hz,s->config.gain_db,s->backend.epoch,ms,power,2048);
+    pthread_mutex_unlock(&s->mutex);s->spectrum_ms=ms+(e?1000:50);
+}
+char *fpv_service_spectrum(struct fpv_service *s)
+{
+    pthread_mutex_lock(&s->mutex);char *json=fpv_spectrum_json(s->spectrum,now_ms());
+    pthread_mutex_unlock(&s->mutex);return json;
+}
 static int stopped(struct fpv_service *s)
 {
     pthread_mutex_lock(&s->mutex);int v=s->stopping||s->quitting||s->reconfigure;pthread_mutex_unlock(&s->mutex);return v;
@@ -45,7 +63,7 @@ static void publish(struct fpv_service *s,const struct fpv_scan_hop *h,unsigned 
     unsigned counts=status->quality[ch].counts,total=counts&65535,good=counts>>16;
     *t=(struct fpv_track){.id=id,.revision=revision,.channel=ch,.standard=std,.height=height,
         .quality=total?100*good/total:0,.frequency_hz=h->actual_hz[ch],.target_hz=h->target_hz[ch],
-        .lo_hz=h->lo_hz,.captured_ms=now_ms(),.epoch=status->epoch,.bmp=bmp,.size=size};
+        .lo_hz=h->lo_hz,.captured_ms=now_ms(),.epoch=status->epoch,.active=1,.bmp=bmp,.size=size};
     struct fpv_feed_meta meta={.captured_mono_ms=t->captured_ms,.frequency_hz=t->frequency_hz,
         .target_hz=t->target_hz,.lo_hz=t->lo_hz,.channel=ch,.standard=std,.width=720,
         .height=height,.epoch=t->epoch,.quality=t->quality,.simulate=s->backend.simulate};
@@ -69,6 +87,23 @@ static int tune_hop(struct fpv_service *s,const struct fpv_scan_config *cfg,
     if(fpv_backend_commit(b)<0){failure(s,"tune commit");return -1;}
     return 0;
 }
+/* Records retain their images. Only a fresh observation of the same search
+ * frequency changes its live marker, including a PAL/NTSC change or lost sync.
+ * Other scan windows remain unchanged until the worker revisits them. */
+static void observe_tracks(struct fpv_service *s,const struct fpv_scan_hop *h,
+                           const struct fpv_capture_scan_status *status)
+{
+    pthread_mutex_lock(&s->mutex);
+    for(unsigned i=0;i<FPV_SCAN_TRACKS;i++) {
+        struct fpv_track *t=&s->tracks[i];if(!t->bmp)continue;
+        for(unsigned ch=0;ch<h->count;ch++)if(t->target_hz==h->target_hz[ch]) {
+            t->active=fpv_scan_candidate(status,s->backend.epoch,ch) &&
+                t->standard==(status->detect.channel[ch].state&1);
+            break;
+        }
+    }
+    pthread_mutex_unlock(&s->mutex);
+}
 static int capture_one(struct fpv_service *s,const struct fpv_scan_hop *h,unsigned ch,
                        const struct fpv_capture_scan_status *before)
 {
@@ -80,6 +115,7 @@ static int capture_one(struct fpv_service *s,const struct fpv_scan_hop *h,unsign
     }
     struct fpv_capture_scan_status after;
     if(fpv_backend_status(b,&after)<0){free(gray);failure(s,"frame freshness");return -1;}
+    observe_tracks(s,h,&after);
     if(!stopped(s) && fpv_scan_candidate(&after,b->epoch,ch) &&
         (before->detect.channel[ch].state>>8)==(after.detect.channel[ch].state>>8) &&
         std==(before->detect.channel[ch].state&1))publish(s,h,ch,std,height,gray,&after);
@@ -102,7 +138,9 @@ static int apply_gain(struct fpv_service *s,struct fpv_scan_config *cfg)
     pthread_mutex_lock(&s->mutex);
     cfg->gain_db=s->config.gain_db=gain;
     if(s->gain_target_db==gain)s->gain_pending=0;
-    if(changed){s->gain_updates++;s->signal_present=0;}
+    if(changed){s->gain_updates++;s->signal_present=0;
+        for(unsigned i=0;i<FPV_SCAN_TRACKS;i++)s->tracks[i].active=0;
+    }
     pthread_mutex_unlock(&s->mutex);
     return changed;
 }
@@ -117,9 +155,11 @@ static int scan_pass(struct fpv_service *s,struct fpv_scan_config *cfg)
         if(fpv_scan_plan(cfg,p,&h)<0)return -1;
         int tuned=tune_hop(s,cfg,&h,p);if(tuned)return tuned<0?-1:0;
         if(apply_gain(s,cfg)<0)return -1;
+        spectrum_capture(s);
         phase(s,"observing");if(pause_ms(s,cfg->dwell_ms)<0)return 0;
         struct fpv_capture_scan_status before;
         if(fpv_backend_status(b,&before)<0){failure(s,"FPGA snapshot");return -1;}
+        observe_tracks(s,&h,&before);
         for(unsigned ch=0;ch<h.count&&!stopped(s);ch++)if(capture_one(s,&h,ch,&before)<0)return -1;
         pthread_mutex_lock(&s->mutex);s->completed=p+h.count;pthread_mutex_unlock(&s->mutex);
     }
@@ -138,20 +178,26 @@ static int lock_pass(struct fpv_service *s,struct fpv_scan_config *cfg)
      * reuse the LO, NCO, detector and DMA configuration until user control. */
     phase(s,"observing");if(pause_ms(s,cfg->dwell_ms)<0)return 0;
     while(!stopped(s)) {
+        uint64_t tick=now_ms();
         int gain=apply_gain(s,cfg);if(gain<0)return -1;
         if(gain){phase(s,"observing");if(pause_ms(s,cfg->dwell_ms)<0)break;}
+        spectrum_capture(s);
         struct fpv_capture_scan_status before;
         if(fpv_backend_status(b,&before)<0){failure(s,"FPGA snapshot");return -1;}
+        observe_tracks(s,&h,&before);
         int present=fpv_scan_candidate(&before,b->epoch,0);
         pthread_mutex_lock(&s->mutex);s->signal_present=present;pthread_mutex_unlock(&s->mutex);
         if(present) {if(capture_one(s,&h,0,&before)<0)return -1;}
         else phase(s,"waiting_signal");
-        if(pause_ms(s,50)<0)break;
+        uint64_t elapsed=now_ms()-tick;
+        if(pause_ms(s,elapsed<50?(unsigned)(50-elapsed):1)<0)break;
     }
     return 0;
 }
 static void configure_locked(struct fpv_service *s,const struct fpv_scan_config *c)
 {
+    if(fpv_spectrum_reset(s->spectrum,c)<0)fpv_spectrum_error(s->spectrum,errno);
+    s->spectrum_ms=0;
     s->config=*c;s->completed=0;s->total=fpv_scan_points(c);s->rounds=0;s->capture_errors=0;
     s->rf_tunes=0;s->ddc_tunes=0;s->captured_frames=0;s->lock_ready=0;s->signal_present=0;
     s->gain_target_db=c->gain_db;s->gain_updates=0;s->gain_pending=0;
@@ -186,15 +232,16 @@ static void *worker(void *arg)
 }
 int fpv_service_init(struct fpv_service *s,int simulate)
 {
-    memset(s,0,sizeof(*s));
-    if(fpv_feed_init(&s->feed)<0)return errno;
+    memset(s,0,sizeof(*s));s->spectrum_fd=-1;
+    s->spectrum=fpv_spectrum_create();if(!s->spectrum)return ENOMEM;
+    if(fpv_feed_init(&s->feed)<0){int e=errno;fpv_spectrum_destroy(s->spectrum);return e;}
     int rc=pthread_mutex_init(&s->mutex,NULL);
-    if(rc){fpv_feed_destroy(&s->feed);return rc;}
+    if(rc){fpv_feed_destroy(&s->feed);fpv_spectrum_destroy(s->spectrum);return rc;}
     rc=pthread_cond_init(&s->condition,NULL);
-    if(rc){pthread_mutex_destroy(&s->mutex);fpv_feed_destroy(&s->feed);return rc;}
+    if(rc){pthread_mutex_destroy(&s->mutex);fpv_feed_destroy(&s->feed);fpv_spectrum_destroy(s->spectrum);return rc;}
     fpv_scan_defaults(&s->config);s->gain_target_db=s->config.gain_db;fpv_backend_init(&s->backend,simulate);strcpy(s->phase,"idle");
     rc=pthread_create(&s->worker,NULL,worker,s);
-    if(rc){pthread_cond_destroy(&s->condition);pthread_mutex_destroy(&s->mutex);fpv_feed_destroy(&s->feed);}
+    if(rc){pthread_cond_destroy(&s->condition);pthread_mutex_destroy(&s->mutex);fpv_feed_destroy(&s->feed);fpv_spectrum_destroy(s->spectrum);}
     return rc;
 }
 int fpv_service_start(struct fpv_service *s,const struct fpv_scan_config *c)
@@ -232,7 +279,7 @@ int fpv_service_clear(struct fpv_service *s)
 void fpv_service_destroy(struct fpv_service *s)
 {
     pthread_mutex_lock(&s->mutex);s->quitting=1;pthread_cond_signal(&s->condition);pthread_mutex_unlock(&s->mutex);
-    pthread_join(s->worker,NULL);clear_locked(s);pthread_cond_destroy(&s->condition);pthread_mutex_destroy(&s->mutex);fpv_feed_destroy(&s->feed);
+    pthread_join(s->worker,NULL);if(s->spectrum_fd>=0)close(s->spectrum_fd);fpv_spectrum_destroy(s->spectrum);clear_locked(s);pthread_cond_destroy(&s->condition);pthread_mutex_destroy(&s->mutex);fpv_feed_destroy(&s->feed);
 }
 /* Escape all backend text; never interpolate arbitrary strings into JSON. */
 static void json_string(FILE *f,const char *v)
@@ -273,7 +320,8 @@ char *fpv_service_status(struct fpv_service *s)
     unsigned count=0;uint64_t now=now_ms();
     for(unsigned i=0;i<FPV_SCAN_TRACKS;i++) {
         const struct fpv_track *t=&s->tracks[i];if(!t->bmp)continue;
-        fprintf(f,"%s{\"id\":%u,\"revision\":%u,\"frequency_hz\":%llu,\"target_hz\":%llu,\"lo_hz\":%llu,\"channel\":%u,\"standard\":\"%s\",\"epoch\":%u,\"sync_quality\":%u,\"age_ms\":%llu,\"width\":720,\"height\":%u}",count++?",":"",t->id,t->revision,(unsigned long long)t->frequency_hz,(unsigned long long)t->target_hz,(unsigned long long)t->lo_hz,t->channel,t->standard?"NTSC":"PAL",t->epoch,t->quality,(unsigned long long)(now-t->captured_ms),t->height);
+        fprintf(f,"%s{\"id\":%u,\"revision\":%u,\"frequency_hz\":%llu,\"target_hz\":%llu,\"lo_hz\":%llu,\"channel\":%u,\"standard\":\"%s\",\"epoch\":%u,\"sync_quality\":%u,\"age_ms\":%llu,\"active\":%s,\"width\":720,\"height\":%u}",count++?",":"",t->id,t->revision,(unsigned long long)t->frequency_hz,(unsigned long long)t->target_hz,(unsigned long long)t->lo_hz,t->channel,t->standard?"NTSC":"PAL",t->epoch,t->quality,(unsigned long long)(now-t->captured_ms),
+            s->running&&!s->stopping&&!s->reconfigure&&!s->error[0]&&t->active?"true":"false",t->height);
     }
     fputs("]}",f);pthread_mutex_unlock(&s->mutex);fclose(f);return out;
 }

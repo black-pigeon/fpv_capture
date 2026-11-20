@@ -133,3 +133,13 @@
         status = "okay";
     };
 };
+
+/ {
+    fpv_spectrum: fpv-spectrum@43c40000 {
+        compatible = "microphase,fpv-spectrum-1.0";
+        reg = <0x43c40000 0x10000>;
+        dmas = <&spectrum_dma 1>;
+        dma-names = "rx";
+        status = "okay";
+    };
+};

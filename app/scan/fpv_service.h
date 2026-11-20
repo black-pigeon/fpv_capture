@@ -2,15 +2,20 @@
 #define FPV_SERVICE_H
 #include "fpv_backend.h"
 #include "fpv_feed.h"
+#include "fpv_spectrum.h"
 #include <pthread.h>
 struct fpv_track {
     unsigned id, revision, channel, standard, height, quality;
     uint64_t frequency_hz, target_hz, lo_hz, captured_ms;
     uint32_t epoch;
+    int active;
     unsigned char *bmp;
     size_t size;
 };
 struct fpv_service {
+    struct fpv_spectrum_store *spectrum;
+    int spectrum_fd;
+    uint64_t spectrum_ms;
     struct fpv_feed feed;
     pthread_mutex_t mutex;
     pthread_cond_t condition;
@@ -34,6 +39,7 @@ int fpv_service_start(struct fpv_service *s,const struct fpv_scan_config *c);
 int fpv_service_set_gain(struct fpv_service *s,unsigned gain);
 void fpv_service_stop(struct fpv_service *s);
 int fpv_service_clear(struct fpv_service *s);
+char *fpv_service_spectrum(struct fpv_service *s);
 char *fpv_service_status(struct fpv_service *s);
 unsigned char *fpv_service_image(struct fpv_service *s,unsigned id,size_t *size);
 #endif

@@ -6,8 +6,9 @@ import sys
 
 
 def install(source, header, kernel):
-    files = [(source / name, name) for name in ('Kconfig', 'Makefile', 'fpv_capture.c', 'COPYING')]
+    files = [(source / name, name) for name in ('Kconfig', 'Makefile', 'fpv_capture.c', 'fpv_spectrum.c', 'COPYING')]
     files.append((header, 'fpv_capture.h'))
+    files.append((header.with_name('fpv_spectrum.h'), 'fpv_spectrum.h'))
     for path, _ in files:
         if not path.is_file():
             raise ValueError(f'missing capture driver input: {path}')

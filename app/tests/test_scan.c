@@ -7,6 +7,7 @@ int main(void)
     struct fpv_scan_config cfg;
     struct fpv_scan_hop hop;
     char error[160];
+    fpv_scan_defaults(&cfg);assert(cfg.gain_db==50);
     assert(fpv_scan_config_parse("bands=5650-5657&step_mhz=2&dwell_ms=150&settle_ms=20&gain_db=20&repeat=1",&cfg,error,sizeof(error))==0);
     assert(fpv_scan_points(&cfg)==5);
     assert(fpv_scan_plan(&cfg,0,&hop)==0 && hop.enable_mask==15 && hop.lo_hz==5653500000ULL);

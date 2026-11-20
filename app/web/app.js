@@ -1,6 +1,7 @@
 'use strict';
 const $ = id => document.getElementById(id);
 const phases = { idle: 'Ready', starting: 'Starting', initializing: 'Initializing RF', tuning: 'Tuning', observing: 'Observing sync', capturing: 'Validating frame', rf_settle: 'RF settling', ddc_tuning: 'Digital tuning', waiting_signal: 'Waiting for video sync', gain_update: 'Applying gain', error: 'Error' };
+let latestReceivedMs = 0;
 let selected = null, currentKey = '', firstStatus = true, busy = false, latest = null, frameLoading = false, gainBusy = false, gainDirty = false;
 function notice(text) { $('message').textContent = text; $('message').hidden = !text; }
 function frequency(hz) { return (hz / 1e6).toFixed(3); }
@@ -43,8 +44,8 @@ function renderTracks(s) {
     $('lock-selected').disabled = selected === null || busy || s.stopping || s.switching;
     $('result-count').textContent = String(tracks.length).padStart(2, '0'); $('track-count').textContent = tracks.length;
 }
-function render(s) {
-    latest = s; $('led').className = 'led online'; $('connection').textContent = 'Connected'; $('simulation').hidden = !s.simulate;
+function render(s, fresh = false) {
+    latest = s; if (fresh) latestReceivedMs = Date.now(); $('led').className = 'led online'; $('connection').textContent = 'Connected'; $('simulation').hidden = !s.simulate;
     const locked = s.mode === 'lock', switching = s.switching || s.stopping;
     $('phase').textContent = s.stopping ? 'Stopping' : s.switching ? 'Switching mode' :
         s.frequency_locked ? (s.signal_present ? 'Locked · Video' : 'Locked · Waiting') : phases[s.phase] || s.phase;
@@ -53,9 +54,9 @@ function render(s) {
     $('stop').disabled = !s.running || switching || busy;
     $('stop').textContent = locked ? 'Stop capture' : 'Stop scan';
     $('clear').disabled = s.running || busy;
-    $('lock').disabled = s.running || switching || busy || gainBusy;
+    $('lock').disabled = switching || busy || gainBusy;
     $('unlock').disabled = !locked || !s.running || switching || busy;
-    $('lock-frequency').disabled = s.running || switching || busy;
+    $('lock-frequency').disabled = switching || busy;
     for (const el of $('scan-form').elements)
         if (el.tagName !== 'BUTTON' || el.id.startsWith('preset-')) el.disabled = s.running || switching || busy;
     $('progress-title').textContent = locked ? 'Fixed frequency' : 'Scan progress';
@@ -89,7 +90,7 @@ function render(s) {
 }
 async function poll() {
     try {
-        const r = await fetch('/api/status', { cache: 'no-store' }); if (!r.ok) throw new Error('Failed to read device status'); render(await r.json());
+        const r = await fetch('/api/status', { cache: 'no-store' }); if (!r.ok) throw new Error('Failed to read device status'); render(await r.json(), true);
     } catch (e) { $('led').className = 'led'; $('connection').textContent = 'Disconnected'; notice(`Cannot connect to device: ${e.message}`); }
     finally { setTimeout(poll, latest && latest.running && latest.mode === 'lock' ? 200 : 700); }
 }
@@ -115,7 +116,7 @@ async function startMode(locked) {
     try {
         await command('/api/start', params.toString());
         const response = await fetch('/api/status', { cache: 'no-store' });
-        if (response.ok) latest = await response.json();
+        if (response.ok) { latest = await response.json(); latestReceivedMs = Date.now(); }
     } catch (err) { notice(err.message); }
     finally { busy = false; if (latest) render(latest); }
 }
@@ -129,7 +130,7 @@ $('gain-form').addEventListener('submit', async e => {
         await command('/api/gain', new URLSearchParams({ gain_db: value }).toString());
         gainDirty = false;
         const response = await fetch('/api/status', { cache: 'no-store' });
-        if (response.ok) latest = await response.json();
+        if (response.ok) { latest = await response.json(); latestReceivedMs = Date.now(); }
     } catch (err) { notice(err.message); }
     finally { gainBusy = false; if (latest) render(latest); }
 });

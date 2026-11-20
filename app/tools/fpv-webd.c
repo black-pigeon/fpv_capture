@@ -107,6 +107,10 @@ static void client(int fd,struct fpv_service *s,struct fpv_stream_server *stream
         }
         return;
     }
+    if(!strcmp(path,"/api/spectrum")) {
+        char *json=fpv_service_spectrum(s);if(!json){message(fd,500,"Out of memory");return;}
+        response(fd,200,"application/json; charset=utf-8",json,strlen(json));free(json);return;
+    }
     if(!strcmp(path,"/api/status")) {
         char *json=fpv_service_status(s);if(!json){message(fd,500,"Out of memory");return;}
         response(fd,200,"application/json; charset=utf-8",json,strlen(json));free(json);return;
@@ -119,6 +123,7 @@ static void client(int fd,struct fpv_service *s,struct fpv_stream_server *stream
     if(!strcmp(path,"/")||!strcmp(path,"/index.html"))asset(fd,root,"index.html","text/html; charset=utf-8");
     else if(!strcmp(path,"/style.css"))asset(fd,root,"style.css","text/css; charset=utf-8");
     else if(!strcmp(path,"/app.js"))asset(fd,root,"app.js","text/javascript; charset=utf-8");
+    else if(!strcmp(path,"/spectrum.js"))asset(fd,root,"spectrum.js","text/javascript; charset=utf-8");
     else if(!strcmp(path,"/microphase-logo.png"))asset(fd,root,"microphase-logo.png","image/png");
     else message(fd,404,"Not found");
 }

@@ -25,7 +25,7 @@ BASE = r'''/dts-v1/;
     sdhci0: mmc {}; uart0: serial {}; uart1: serial1 {}; spi0: spi {};
     qspi: qspi {}; i2c0: i2c {};
     gpio0: gpio { gpio-controller; #gpio-cells = <2>; };
-    clkc: clock {}; fpv_dma: dma {};
+    clkc: clock {}; fpv_dma: dma {}; spectrum_dma: spectrum-dma { #dma-cells = <1>; };
 };
 '''
 

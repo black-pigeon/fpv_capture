@@ -69,6 +69,16 @@ class HardwareInputTest(unittest.TestCase):
             self.assertEqual(load_hardware(root / 'input.xsa', root / 'manifest.json',
                                            board='e310'), (manifest, bit))
 
+    def test_spectrum_contract_is_optional_but_exact(self):
+        xsa, manifest = hardware_fixture()
+        manifest['spectrum'] = {'register_version': 1, 'bins': 2048,
+            'sample_rate_hz': 61440000, 'averages': 16, 'dma_count': 1,
+            'control_base': '0x43c40000', 'dma_base': '0x40440000'}
+        validate_xsa(xsa, manifest)
+        manifest['spectrum']['bins'] = 4096
+        with self.assertRaises(ValueError):
+            validate_xsa(xsa, manifest)
+
     def test_board_selects_default_paths(self):
         with tempfile.TemporaryDirectory() as temporary:
             firmware = Path(temporary) / 'firmware'

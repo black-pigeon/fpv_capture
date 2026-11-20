@@ -370,7 +370,7 @@ $(BITSTREAM_FILE): $(HARDWARE_FILE) $(HW_MANIFEST) scripts/hardware_input.py | $
 
 hardware: $(HARDWARE_FILE) $(BITSTREAM_FILE)
 
-$(LINUX_CONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(LINUX_FETCH_STAMP) $(DTC_COMPAT_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(BOARD_DIR)/apply-linux-patches.sh $(CURDIR)/../app/include/linux/fpv_capture.h $(LINUX_PATCH_FILES) $(BOARD_LINUX_FILES) | check-source-board $(STAMP_DIR)
+$(LINUX_CONFIG_STAMP): $(SOURCE_IDENTITY_INPUTS) $(LINUX_FETCH_STAMP) $(DTC_COMPAT_STAMP) $(BUILDROOT_TOOLCHAIN_FIX_STAMP) $(BOARD_DIR)/apply-linux-patches.sh scripts/install_capture_driver.py $(CURDIR)/../app/include/linux/fpv_capture.h $(CURDIR)/../app/include/linux/fpv_spectrum.h $(LINUX_PATCH_FILES) $(BOARD_LINUX_FILES) | check-source-board $(STAMP_DIR)
 	# Apply Linux kernel patches if available
 	if [ -f "$(BOARD_DIR)/apply-linux-patches.sh" ]; then \
 		bash "$(BOARD_DIR)/apply-linux-patches.sh" "$(LINUX_DIR)"; \

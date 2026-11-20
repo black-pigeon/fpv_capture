@@ -86,12 +86,17 @@ int main(void)
     unsigned after_gain=s.captured_frames;
     pthread_mutex_unlock(&s.mutex);
     wait_frames(&s,after_gain+2,c.lock_hz);
+    char *live_status=fpv_service_status(&s);assert(live_status);
+    assert(strstr(live_status,"\"active\":true"));free(live_status);
     atomic_store(&video_present,0);
     struct timespec loss_wait={0,200000000};nanosleep(&loss_wait,NULL);
     pthread_mutex_lock(&s.mutex);
     unsigned prior=s.captured_frames;
     assert(s.running && s.lock_ready && !s.signal_present && s.ddc_tunes==1);
     pthread_mutex_unlock(&s.mutex);
+    live_status=fpv_service_status(&s);assert(live_status);
+    assert(strstr(live_status,"\"active\":false") && !strstr(live_status,"\"active\":true"));
+    assert(strstr(live_status,"\"width\":720"));free(live_status);
     atomic_store(&video_present,1);wait_frames(&s,prior+2,c.lock_hz);
     pthread_mutex_lock(&s.mutex);prior=s.captured_frames;pthread_mutex_unlock(&s.mutex);
     atomic_store(&video_standard,1);wait_frames(&s,prior+2,c.lock_hz);
@@ -102,6 +107,9 @@ int main(void)
     }
     assert(ntsc==1 && s.ddc_tunes==1);
     pthread_mutex_unlock(&s.mutex);
+    live_status=fpv_service_status(&s);assert(live_status);
+    const char *active=strstr(live_status,"\"active\":true");
+    assert(active && !strstr(active+1,"\"active\":true"));free(live_status);
     c.lock_hz=5860000000ULL;
     assert(!fpv_service_start(&s,&c));wait_frames(&s,3,c.lock_hz);
     pthread_mutex_lock(&s.mutex);assert(s.ddc_tunes==1 && s.config.lock_hz==c.lock_hz);pthread_mutex_unlock(&s.mutex);
@@ -109,6 +117,20 @@ int main(void)
     assert(!fpv_service_start(&s,&c));wait_idle(&s);
     pthread_mutex_lock(&s.mutex);assert(s.completed==s.total && s.config.mode==FPV_SCAN_MODE_SCAN);pthread_mutex_unlock(&s.mutex);
     c.mode=FPV_SCAN_MODE_LOCK;assert(!fpv_service_start(&s,&c));wait_frames(&s,2,c.lock_hz);
+    fpv_service_stop(&s);wait_idle(&s);
+    /* A revisited scan frequency loses its marker without losing its image. */
+    c.mode=FPV_SCAN_MODE_SCAN;c.repeat=1;
+    assert(!fpv_service_start(&s,&c));wait_frames(&s,2,c.bands[0].start_hz);
+    atomic_store(&video_present,0);
+    for(unsigned n=0;n<200;n++) {
+        live_status=fpv_service_status(&s);assert(live_status);
+        int lost=strstr(live_status,"\"active\":false") && !strstr(live_status,"\"active\":true");
+        free(live_status);if(lost)break;
+        struct timespec delay={0,10000000};nanosleep(&delay,NULL);
+    }
+    live_status=fpv_service_status(&s);assert(live_status);
+    assert(strstr(live_status,"\"active\":false") && !strstr(live_status,"\"active\":true"));
+    assert(strstr(live_status,"\"width\":720"));free(live_status);
     fpv_service_stop(&s);wait_idle(&s);
     fpv_service_destroy(&s);
     puts("PASS worker black-frame acceptance, stale epoch/generation and lost-lock frame rejection, stop during settle");

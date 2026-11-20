@@ -87,6 +87,33 @@ def verify_ethernet_dtb(dtb, expected_mode='rgmii-id', board='e200'):
             'converter_address': 8, 'forced_phy_id': False,
             'board_link_tested': False}
 
+def verify_spectrum_dtb(dtb):
+    """Resolve the spectrum consumer to its independent S2MM channel and IRQ."""
+    def get(node, prop, kind='s'):
+        return subprocess.check_output(['fdtget', '-t', kind, str(dtb), node, prop],
+                                       text=True).strip()
+    consumer = '/fpv-spectrum@43c40000'
+    dma = '/amba_pl/dma@40440000'
+    channel = dma + '/dma-channel@40440030'
+    assert get(consumer, 'compatible') == 'microphase,fpv-spectrum-1.0'
+    assert get(consumer, 'status') == 'okay'
+    assert get(consumer, 'reg', 'x').split() == ['43c40000', '10000']
+    assert get(consumer, 'dma-names') == 'rx'
+    assert get(consumer, 'dmas', 'x').split() == [get(dma, 'phandle', 'x'), '1'], 'spectrum DMA phandle/channel mismatch'
+    assert get(dma, '#dma-cells', 'u') == '1'
+    assert get(dma, 'reg', 'x').split() == ['40440000', '10000']
+    assert get(channel, 'compatible') == 'xlnx,axi-dma-s2mm-channel'
+    assert get(channel, 'interrupts', 'u').split() == ['0', '31', '4'], 'spectrum DMA IRQ mismatch'
+    assert get(channel, 'xlnx,datawidth', 'u') == '32'
+
+def verify_spectrum_assets(files, manifest):
+    """A spectrum handoff must ship its matching viewer and HTTP endpoint."""
+    if 'spectrum' not in manifest:
+        return
+    asset = 'usr/share/e200-fpv/web/spectrum.js'
+    assert files.get(asset) == (ROOT / 'app/web/spectrum.js').read_bytes(), asset
+    assert b'/api/spectrum' in files['usr/sbin/fpv-webd'], 'spectrum API missing'
+
 def verify(sd, xsa=None, hardware_manifest=None, board='e200'):
     for name in core_files(board):
         assert (sd / name).stat().st_size > 0, name
@@ -108,6 +135,9 @@ def verify(sd, xsa=None, hardware_manifest=None, board='e200'):
     assert files[diag] == (ROOT / f'firmware/board/{board}/buildroot/rootfs-overlay' / diag).read_bytes()
     for name in ('index.html', 'style.css', 'app.js'):
         assert files['usr/share/e200-fpv/web/' + name] == (ROOT / 'app/web' / name).read_bytes(), name
+    verify_spectrum_assets(files, manifest)
+    if 'spectrum' in manifest:
+        verify_spectrum_dtb(sd / 'devicetree.dtb')
     assert b'192.168.1.10' in files['etc/network/interfaces']
     assert not any('libiio' in name for name in files)
     assert (sd / 'zImage').read_bytes() == (kernel_source(board) / 'arch/arm/boot/zImage').read_bytes()
@@ -137,6 +167,7 @@ def main():
     (sd / 'fpga-manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     inputs = [Path(__file__).resolve(), ROOT / 'firmware/sources.lock.json', kernel_source(board) / '.config',
               ROOT / 'firmware/board/e200/linux/fpv_capture/fpv_capture.c',
+              ROOT / 'firmware/board/e200/linux/fpv_capture/fpv_spectrum.c',
               ROOT / f'firmware/board/{board}/buildroot/defconfig',
               ROOT / f'firmware/board/{board}/buildroot/rootfs-overlay/etc/init.d/S95fpv-web',
               ROOT / f'firmware/board/{board}/buildroot/rootfs-overlay/usr/sbin/fpv-net-diag',

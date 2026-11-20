@@ -25,10 +25,12 @@
 ## 网页操作
 
 - **扫频**：在 **Frequency ranges** 输入 MHz 范围，例如 `5650-5950`；**Search grid** 默认 6 MHz。点击 **Start scan**，在 **Records** 查看检测结果，点击 **Save BMP** 保存图像。
-- **定频**：停止扫描，在 **Lock → Frequency** 输入频点并点击 **Lock frequency**，或在检测结果中点击 **Lock this frequency**。**Unlock frequency / Resume scan** 恢复扫描，**Stop capture** 停止采集。
-- **增益**：扫描和定频接收时均可修改 **RX gain**（0–60 dB），点击 **Apply** 生效。频段、搜索步进和手动锁频频率在停止时修改。
+- **定频**：扫描过程中可直接在 **Lock → Frequency** 输入频点并点击 **Lock frequency**，或在检测结果中点击 **Lock this frequency**；锁频后也可修改频率并再次锁定。**Unlock frequency / Resume scan** 恢复扫描，**Stop capture** 停止采集。
+- **增益**：**RX gain** 默认 50 dB，可在扫描和定频接收时调整（0–60 dB），点击 **Apply** 生效。频段和搜索步进在停止扫描时修改。
 
 PAL/NTSC 自动识别。搜索组合 AD9361 射频调谐与四路 DDC 基带调谐，搜索步进默认 6 MHz。
+
+网页 **SPECTRUM** 显示原始 IQ 的 2048 点 FFT（61.44 MSPS，30 kHz 频点间隔）。扫频时拼接各窗口的中心 54 MHz，定频时持续刷新；灰色曲线表示旧数据，纵轴为 dBFS。
 
 ## 上位机接收
 
@@ -39,6 +41,8 @@ python3 tools/fpv_receiver/receive.py --url http://192.168.1.10 --output fpv-rec
 # 锁定频点并持续接收，Ctrl+C 结束
 python3 tools/fpv_receiver/receive.py --url http://192.168.1.10 --lock-mhz 5800 --gain-db 30
 ```
+
+`GET /api/spectrum` 返回拼接频谱、频率坐标、接收增益和数据年龄。
 
 ## 编译固件
 

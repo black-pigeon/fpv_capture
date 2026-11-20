@@ -9,10 +9,10 @@ import struct
 import tarfile
 
 if __package__:
-    from .package_test_sd import ROOT, cpio_files, digest, core_files
+    from .package_test_sd import ROOT, cpio_files, digest, core_files, verify_spectrum_assets
     from .hardware_input import load_hardware
 else:
-    from package_test_sd import ROOT, cpio_files, digest, core_files
+    from package_test_sd import ROOT, cpio_files, digest, core_files, verify_spectrum_assets
     from hardware_input import load_hardware
 
 
@@ -45,6 +45,7 @@ def verify(rootfs, xsa=None, hardware_manifest=None, board='e200'):
     assert b'192.168.1.10' in files['etc/network/interfaces']
     assert not any('libiio' in name for name in files)
     manifest, _ = load_hardware(xsa, hardware_manifest, board=board)
+    verify_spectrum_assets(files, manifest)
     baseline = ROOT / 'firmware/build/e200/images/e200-fpv-ethernet-20261117-bootfiles/rootfs.cpio.gz'
     if board == 'e200' and baseline.exists():
         previous, _ = cpio_files(baseline)

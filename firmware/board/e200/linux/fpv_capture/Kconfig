@@ -1,6 +1,6 @@
 config FPV_CAPTURE
-	tristate "E200 shared FPV frame capture"
+	tristate "AntSDR FPV image and spectrum capture"
 	depends on OF && HAS_DMA && DMA_ENGINE
 	help
-	  Exclusive /dev/fpv-capture interface for the E200 selected-channel
-	  grayscale packet stream. Uses the Xilinx DMAengine provider.
+	  Exclusive /dev/fpv-capture and /dev/fpv-spectrum interfaces for
+	  grayscale frames and FFT snapshots. Uses the Xilinx DMAengine provider.

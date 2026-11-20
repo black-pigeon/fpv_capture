@@ -16,3 +16,7 @@ progress{display:block;width:100%;height:3px;border:0;appearance:none;background
 @media(max-width:1000px){main{padding:22px;grid-template-columns:245px minmax(0,1fr);gap:20px}header{padding:16px 22px}.metrics{grid-template-columns:1fr 1fr;row-gap:15px}.metrics>div:nth-child(3){padding-left:0;border-left:0}.channel-centers{grid-template-columns:1fr}.brand strong{font-size:20px}}
 @media(max-width:750px){header{min-height:68px;padding:14px 16px;gap:10px}.brand{gap:12px}.brand-logo{width:112px;height:35px}.brand strong{font-size:18px}main{grid-template-columns:minmax(0,1fr);padding:18px 16px;gap:24px}.controls{padding:18px}.image-area{height:350px}.simulation{padding:8px 16px}}
 @media(max-width:480px){.brand-logo{width:96px;height:30px}.brand strong{font-size:16px}.connection #connection{display:none}.metrics strong{font-size:17px}.image-area{height:280px}.viewer-bottom{gap:10px;padding:12px}.viewer-bottom strong{font-size:15px}}
+
+.spectrum {margin:16px 0;overflow:hidden}
+#spectrum {display:block;width:100%;height:230px;touch-action:pan-y}
+.spectrum-footer {display:flex;justify-content:space-between;gap:12px;padding:0 16px 12px;color:var(--muted,#6b7280);font-size:12px}

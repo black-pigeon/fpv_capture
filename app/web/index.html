@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AntSDR Analog FPV Scanner</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AntSDR Analog FPV Scanner</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script><script src="/spectrum.js" defer></script></head>
 <body>
 <header><div class="brand"><img class="brand-logo" src="/microphase-logo.png" alt="Microphase" width="144" height="45"><strong>AntSDR Analog FPV Scanner</strong></div><div class="connection"><span id="led" class="led"></span><span id="connection">Connecting</span></div></header>
 <div id="simulation" class="simulation" hidden>SIMULATION · No RF hardware</div>
@@ -19,7 +19,7 @@
 </form>
 <section class="gain-controls" aria-labelledby="gain-title">
 <h2 id="gain-title">RX gain</h2>
-<form id="gain-form"><label for="gain">Gain <span>dB</span></label><div class="gain-row"><input id="gain" name="gain_db" type="number" min="0" max="60" step="1" value="20" required><button class="quiet" id="apply-gain" type="submit">Apply</button></div></form>
+<form id="gain-form"><label for="gain">Gain <span>dB</span></label><div class="gain-row"><input id="gain" name="gain_db" type="number" min="0" max="60" step="1" value="50" required><button class="quiet" id="apply-gain" type="submit">Apply</button></div></form>
 <p id="gain-status" class="control-status" role="status">20 dB</p>
 </section>
 <section class="lock-controls" aria-labelledby="lock-title">
@@ -32,6 +32,7 @@
 <div class="workspace-heading"><h2>Live view</h2><span id="phase" class="status-tag">Ready</span></div>
 <div class="metrics"><div><span id="progress-title">Scan progress</span><strong id="progress-label">0%</strong></div><div><span>RF LO</span><strong id="lo">— MHz</strong></div><div><span id="rounds-title">Passes</span><strong id="rounds">0</strong></div><div><span>Records</span><strong id="track-count">0</strong></div></div><progress id="progress" max="1" value="0" aria-label="Current scan progress"></progress>
 <p id="message" role="status" class="message" hidden></p>
+<section class="spectrum panel" aria-label="RF spectrum"><div class="viewer-top"><span>SPECTRUM</span><span id="spectrum-status">Waiting</span></div><canvas id="spectrum" role="img" aria-label="Received RF power by frequency"></canvas><div class="spectrum-footer"><span>MHz · dBFS</span><span id="spectrum-detail">2048 FFT · 30 kHz bins</span></div></section>
 <div class="viewer panel"><div class="viewer-top"><span>VIDEO</span><span id="frame-size">720 × 576 / 480</span></div><div class="image-area"><div id="empty"><strong>Waiting for video</strong></div><img id="frame" alt="Grayscale frame from the selected observation" hidden></div><div class="viewer-bottom"><div><strong id="selected-frequency">No image</strong><span id="selected-detail"></span></div><button id="lock-selected" class="quiet" type="button" disabled>Lock this frequency</button><a id="download" hidden download="fpv-frame.bmp">Save BMP ↓</a></div></div>
 <div class="results-heading"><h3>Records <span id="result-count">00</span></h3><button id="clear" class="quiet" type="button">Clear</button></div>
 <div class="table-wrap panel"><table><thead><tr><th>Frequency / MHz</th><th>Standard</th><th>Channel</th><th>Quality</th><th>Age</th><th></th></tr></thead><tbody id="results"><tr><td colspan="6" class="empty-row">No records</td></tr></tbody></table></div>

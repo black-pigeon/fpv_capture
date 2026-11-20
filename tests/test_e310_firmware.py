@@ -78,6 +78,7 @@ class E310FirmwareTest(unittest.TestCase):
  sdhci0: mmc {}; uart0: serial@e0000000 { reg = <0xe0000000 0x1000>; };
  uart1: serial@e0001000 { reg = <0xe0001000 0x1000>; }; spi0: spi {}; qspi: qspi {};
  gpio0: gpio { gpio-controller; #gpio-cells = <2>; }; clkc: clock {};
+ spectrum_dma: dma@40440000 { reg = <0x40440000 0x10000>; #dma-cells = <1>; };
  fpv_dma: dma@40400000 { reg = <0x40400000 0x10000>; #dma-cells = <1>; };
 };
 '''

@@ -9,6 +9,7 @@
 !/firmware/board/e200/linux/fpv_capture/Kconfig
 !/firmware/board/e200/linux/fpv_capture/Makefile
 !/firmware/board/e200/linux/fpv_capture/fpv_capture.c
+!/firmware/board/e200/linux/fpv_capture/fpv_spectrum.c
 !/firmware/board/e200/linux/fpv_capture/COPYING
 /firmware/board/e200/patches/autosave/
 

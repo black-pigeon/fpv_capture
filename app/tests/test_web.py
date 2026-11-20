@@ -32,6 +32,7 @@ try:
         time.sleep(.02)
     else: raise AssertionError('server did not start')
     assert json.loads(request('GET', '/api/status')[2])['config']['step_mhz'] == 6
+    assert json.loads(request('GET', '/api/status')[2])['config']['gain_db'] == 50
     html = request('GET', '/')[2].decode()
     assert '<html lang="en">' in html and 'Search grid' in html and 'Fast · 8 MHz' in html and 'Lock frequency' in html
     for asset in ('/', '/app.js'):
